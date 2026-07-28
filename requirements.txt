@@ -1,2 +1,3 @@
 pyTelegramBotAPI
 httpx
+python-docx
