@@ -143,7 +143,7 @@ class PumpDatabase:
         if not clearance_data:
             return {
                 "status": "unknown",
-                "message": f"❌ Данные по зазору '{clearance_type}' для '{pump_type}' отсутствуют",
+                "message": f"Данные по зазору '{clearance_type}' для '{pump_type}' отсутствуют",
                 "action": "Проверьте правильность ввода"
             }
         
@@ -154,26 +154,26 @@ class PumpDatabase:
         if measured_value < standard["min"]:
             return {
                 "status": "warning",
-                "message": f"⚠️ Зазор МЕНЬШЕ нормы: {measured_value} мм (норма: {standard['min']}-{standard['max']} мм)",
+                "message": f"Зазор МЕНЬШЕ нормы: {measured_value} мм (норма: {standard['min']}-{standard['max']} мм)",
                 "action": "Проверьте точность измерения"
             }
         elif measured_value <= standard["max"]:
             return {
                 "status": "ok",
-                "message": f"✅ Зазор В НОРМЕ: {measured_value} мм (норма: {standard['min']}-{standard['max']} мм)",
+                "message": f"Зазор В НОРМЕ: {measured_value} мм (норма: {standard['min']}-{standard['max']} мм)",
                 "action": "Деталь работоспособна"
             }
         elif measured_value <= max_allowed:
             return {
                 "status": "critical",
-                "message": f"🔴 Зазор ПРЕВЫШЕН (допустимый предел): {measured_value} мм (макс: {max_allowed} мм)",
-                "action": f"⚠️ Рекомендуется ремонт: {repair_after}"
+                "message": f"Зазор ПРЕВЫШЕН (допустимый предел): {measured_value} мм (макс: {max_allowed} мм)",
+                "action": f"Рекомендуется ремонт: {repair_after}"
             }
         else:
             return {
                 "status": "fatal",
-                "message": f"❌ Зазор КРИТИЧЕСКИ превышен: {measured_value} мм (макс: {max_allowed} мм)",
-                "action": f"🚨 Требуется срочная замена: {repair_after}"
+                "message": f"Зазор КРИТИЧЕСКИ превышен: {measured_value} мм (макс: {max_allowed} мм)",
+                "action": f"Требуется срочная замена: {repair_after}"
             }
 
     def get_common_defects(self, pump_type):
@@ -572,7 +572,7 @@ def create_defect_document(ship, equipment, defects, work_volume):
     return file_stream
 
 # ============================================================
-#  ГЛАВНЫЙ ОБРАБОТЧИК (СВОБОДНОЕ ОБЩЕНИЕ)
+#  КОМАНДА /START
 # ============================================================
 
 @bot.message_handler(commands=['start'])
@@ -591,6 +591,10 @@ def send_welcome(message):
         "• 'Какие дефекты у шестерёнчатого насоса?'"
     )
 
+# ============================================================
+#  ГЛАВНЫЙ ОБРАБОТЧИК (СВОБОДНОЕ ОБЩЕНИЕ)
+# ============================================================
+
 @bot.message_handler(func=lambda message: True)
 def handle_intelligent_input(message):
     user_text = message.text
@@ -601,7 +605,6 @@ def handle_intelligent_input(message):
     
     # ---- 1. ПРОВЕРКА ЗАЗОРОВ (если явно просят проверить) ----
     if any(word in text_lower for word in ['проверь зазор', 'проверка зазора', 'какой зазор', 'норма зазора']):
-        # Извлекаем данные из текста
         clearances = extract_clearances_from_text(user_text)
         if clearances:
             responses = []
@@ -612,7 +615,7 @@ def handle_intelligent_input(message):
                         pump_type = "gear" if "шестерен" in text_lower else "centrifugal"
                     
                     result = pump_db.check_clearance(pump_type, c['type'], c['value'])
-                    responses.append(f"🔹 {c['type']}: {c['value']} мм → {result['message']}")
+                    responses.append(f"🔹 {c['type']}: {c['value']} мм -> {result['message']}")
             
             if responses:
                 response = "📊 **Результаты проверки зазоров:**\n\n" + "\n".join(responses)
@@ -629,17 +632,14 @@ def handle_intelligent_input(message):
         return
     
     # ---- 2. СОЗДАНИЕ АКТА ДЕФЕКТАЦИИ (ГЛАВНЫЙ ПРИОРИТЕТ) ----
-    # Проверяем, хочет ли пользователь создать акт
     wants_act = any(word in text_lower for word in [
         'акт', 'дефектовк', 'сделай акт', 'оформи', 'составь', 
         'создай', 'сформируй', 'нужен акт', 'акт дефектации'
     ])
     
-    # Если есть хотя бы одно слово о ремонте/судне/насосе И есть слово "акт" или "дефектовк"
     has_repair_context = any(word in text_lower for word in ['ремонт', 'судно', 'насос', 'зазор', 'износ', 'течь'])
     
     if wants_act or (has_repair_context and any(word in text_lower for word in ['сделай', 'оформи', 'создай'])):
-        # Полный анализ
         analysis = analyze_query(user_text)
         
         ship = analysis.get('ship')
@@ -648,13 +648,11 @@ def handle_intelligent_input(message):
         pump_type = analysis.get('pump_type')
         clearances = analysis.get('clearances', [])
         
-        # Если есть зазоры - добавляем их в дефекты
         for c in clearances:
             defect_text = f"зазор {c['type']}: {c['value']} мм"
             if defect_text not in defects:
                 defects.append(defect_text)
         
-        # Если нет дефектов - пробуем извлечь из текста
         if not defects:
             defect_keywords = ["износ", "течь", "коррози", "трещин", "разруш", 
                               "выкрашиван", "задир", "деформац", "ржав", "люфт"]
@@ -670,15 +668,12 @@ def handle_intelligent_input(message):
                 )
                 return
         
-        # Формируем Equipment
         if not equipment:
             pump_name = "шестерёнчатый" if pump_type == "gear" else "центробежный" if pump_type else ""
             equipment = f"насос {pump_name}".strip() if pump_name else "насос"
         
-        # Генерируем объём работ
         work_volume = generate_work_volume(defects, user_text, pump_type)
         
-        # Создаём документ
         file_stream = create_defect_document(ship, equipment, defects, work_volume)
         bot.send_document(
             message.chat.id, 
@@ -697,7 +692,7 @@ def handle_intelligent_input(message):
             response = f"📋 **Частые дефекты {pump_name} насоса:**\n\n"
             for i, defect in enumerate(defects, 1):
                 method = pump_db.get_repair_method(pump_type, defect)
-                method_text = f" → {method}" if method else ""
+                method_text = f" -> {method}" if method else ""
                 response += f"{i}. {defect}{method_text}\n"
             bot.reply_to(message, response, parse_mode='Markdown')
             return
@@ -740,4 +735,38 @@ def handle_intelligent_input(message):
                 response += "• Две шестерни (ведущая и ведомая)\n"
                 response += "• Корпус с перепускным клапаном\n"
                 response += "• Подшипники скольжения\n"
-                response += "• Т
+                response += "• Торцевое уплотнение\n\n"
+            
+            response += "💡 Для проверки зазоров используйте:\n"
+            response += f"  `{pump_type} radial 0.15`\n"
+            response += f"  `{pump_type} axial 0.3`\n"
+            
+            bot.reply_to(message, response, parse_mode='Markdown')
+            return
+    
+    # ---- 6. НЕПОНЯТНЫЙ ЗАПРОС ----
+    bot.reply_to(message,
+        "🤔 Я не совсем понял ваш запрос.\n\n"
+        "Вот что я умею:\n"
+        "📄 **Создать акт дефектации**\n"
+        "  -> Опишите судно и дефекты, добавьте 'сделай акт'\n\n"
+        "📋 **Показать дефекты**\n"
+        "  -> Спросите 'какие дефекты у шестерёнчатого насоса'\n\n"
+        "🔧 **Проверить зазор**\n"
+        "  -> Напишите 'проверь зазор 0.25'\n\n"
+        "💬 Просто пишите на русском — я пойму!"
+    )
+
+# ============================================================
+#  ЗАПУСК
+# ============================================================
+
+if __name__ == '__main__':
+    print("🤖 Бот-ассистент запущен!")
+    print("📌 Доступные функции:")
+    print("  • Создание актов дефектации")
+    print("  • Проверка зазоров по ТУ")
+    print("  • Информация о дефектах")
+    print("  • Нормативы зазоров")
+    print("  • Свободное общение")
+    bot.infinity_polling()
