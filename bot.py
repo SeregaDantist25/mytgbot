@@ -5,11 +5,11 @@ from telebot import custom_filters
 import httpx
 from datetime import datetime
 from docx import Document
-from docx.shared import Pt, Inches
+from docx.shared import Pt
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from io import BytesIO
-import json
 import re
+import json
 
 # --- Настройки ---
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -21,92 +21,78 @@ if not BOT_TOKEN:
 bot = telebot.TeleBot(BOT_TOKEN)
 bot.add_custom_filter(custom_filters.StateFilter(bot))
 
-# --- Системные промпты для AI (язык запроса к Groq) ---
-SYSTEM_PROMPT_ANALYZE = """
-Ты — интеллектуальный помощник инженера-технолога судоремонтного предприятия.
-Проанализируй запрос пользователя и верни результат строго в формате JSON.
-
-Поля JSON:
-- "document_type": тип документа (defect, avr, tech, unknown)
-- "ship": название судна (если указано, иначе null)
-- "equipment": название оборудования (если указано, иначе null)
-- "defects": список дефектов (если есть, иначе [])
-- "measurements": список замеров (если есть, иначе [])
-- "summary": краткое описание работ (для АВР)
-
-Пример 1:
-Запрос: "Судно Аргака, фекальный насос, разрушена крылатка, ржавый крепеж, вал. Сделай акт дефектации и АВР."
-Ответ: {"document_type": "defect", "ship": "Аргака", "equipment": "фекальный насос", "defects": ["разрушена крылатка", "ржавый крепеж", "коцаный вал"], "measurements": [], "summary": "Ремонт фекального насоса"}
-
-Пример 2:
-Запрос: "Сделай акт выполненных работ по пластуну, заменили сальники и подшипники"
-Ответ: {"document_type": "avr", "ship": "Пластун", "equipment": "насос", "defects": [], "measurements": [], "summary": "Замена сальников и подшипников"}
-
-Пример 3:
-Запрос: "Привет, как дела?"
-Ответ: {"document_type": "unknown", "ship": null, "equipment": null, "defects": [], "measurements": [], "summary": ""}
-
-Верни только JSON, без пояснений.
-"""
-
-SYSTEM_PROMPT_GENERATE = """
-Ты — инженер-технолог. По описанию дефектов составь объём работ.
-Обязательно включи: демонтаж, разборку, дефектацию, замену/восстановление, сборку, монтаж, предъявление л/с.
-Отвечай кратко, только перечень работ.
-"""
-
-# --- Функция для анализа запроса через Groq ---
-def analyze_query(user_text):
-    if not GROQ_API_KEY:
-        return {"document_type": "unknown", "ship": None, "equipment": None, "defects": [], "measurements": [], "summary": ""}
+# --- Упрощённый анализ запроса (без AI) ---
+def simple_analyze(text):
+    text_lower = text.lower()
+    result = {
+        "document_type": "unknown",
+        "ship": None,
+        "equipment": None,
+        "defects": [],
+        "measurements": []
+    }
     
-    try:
-        client = httpx.Client(timeout=30.0)
-        response = client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-            json={
-                "model": "mixtral-8x7b-32768",
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT_ANALYZE},
-                    {"role": "user", "content": user_text}
-                ]
-            }
-        )
-        if response.status_code == 200:
-            result = response.json()['choices'][0]['message']['content']
-            # Попытка извлечь JSON из ответа
-            json_match = re.search(r'\{.*\}', result, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group())
-            else:
-                return {"document_type": "unknown", "ship": None, "equipment": None, "defects": [], "measurements": [], "summary": ""}
-        else:
-            return {"document_type": "unknown", "ship": None, "equipment": None, "defects": [], "measurements": [], "summary": ""}
-    except Exception as e:
-        print(f"Ошибка анализа: {e}")
-        return {"document_type": "unknown", "ship": None, "equipment": None, "defects": [], "measurements": [], "summary": ""}
+    # 1. Определяем тип документа
+    if "акт" in text_lower or "дефектовк" in text_lower:
+        result["document_type"] = "defect"
+    elif "авр" in text_lower or "выполненных" in text_lower:
+        result["document_type"] = "avr"
+    else:
+        # Если нет явных слов, но есть описание дефектов — считаем дефектовкой
+        if any(word in text_lower for word in ["слом", "износ", "течь", "коррози", "трещин", "разруш"]):
+            result["document_type"] = "defect"
+    
+    # 2. Ищем судно (по ключевым словам)
+    ships = ["аргака", "пластун", "славянская", "первоуральск"]
+    for ship in ships:
+        if ship in text_lower:
+            result["ship"] = ship.capitalize()
+            break
+    
+    # 3. Ищем оборудование (пытаемся найти что-то после "насос", "двигатель" и т.д.)
+    equipment_keywords = ["насос", "двигатель", "компрессор", "вентилятор", "генератор", "кран", "лебедка"]
+    for kw in equipment_keywords:
+        if kw in text_lower:
+            # Берём слово перед ключевым или после
+            parts = re.split(r'[,.!?;]', text)
+            for part in parts:
+                if kw in part.lower():
+                    result["equipment"] = part.strip()
+                    break
+            if result["equipment"]:
+                break
+    
+    # 4. Ищем дефекты (ключевые слова)
+    defect_keywords = ["износ", "течь", "коррози", "трещин", "разруш", "слом", "задир", "деформац", "ржав"]
+    for defect in defect_keywords:
+        if defect in text_lower:
+            # Извлекаем фразу с дефектом
+            for sentence in re.split(r'[,.!?;]', text):
+                if defect in sentence.lower():
+                    result["defects"].append(sentence.strip())
+                    break
+    
+    if not result["defects"] and result["document_type"] != "unknown":
+        result["defects"] = ["Дефекты не указаны, требуется уточнение"]
+    
+    return result
 
 # --- Функция генерации объёма работ через AI ---
-def generate_work_volume(defects, measurements):
+def generate_work_volume(defects):
     if not GROQ_API_KEY or not defects:
         return "Демонтаж, разборка, дефектация, замена/восстановление, сборка, монтаж, предъявление л/с."
     
     try:
         client = httpx.Client(timeout=30.0)
         defect_text = "; ".join(defects)
-        measurements_text = "; ".join(measurements) if measurements else "без замеров"
-        prompt = f"Дефекты: {defect_text}. Замеры: {measurements_text}"
+        prompt = f"Составь объём работ для дефектов: {defect_text}. Включи демонтаж, разборку, замену/восстановление, сборку, монтаж, предъявление л/с. Отвечай коротко."
         
         response = client.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
             json={
                 "model": "mixtral-8x7b-32768",
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT_GENERATE},
-                    {"role": "user", "content": prompt}
-                ]
+                "messages": [{"role": "user", "content": prompt}]
             }
         )
         if response.status_code == 200:
@@ -118,7 +104,7 @@ def generate_work_volume(defects, measurements):
         return "Демонтаж, разборка, дефектация, замена/восстановление, сборка, монтаж, предъявление л/с."
 
 # --- Функция создания Акта дефектации (Word) ---
-def create_defect_document(ship, equipment, defects, measurements, work_volume):
+def create_defect_document(ship, equipment, defects, work_volume):
     doc = Document()
     style = doc.styles['Normal']
     style.font.name = 'Times New Roman'
@@ -174,7 +160,7 @@ def create_defect_document(ship, equipment, defects, measurements, work_volume):
     row = table.rows[1].cells
     row[0].text = '1'
     row[1].text = equipment or "Не указано"
-    row[2].text = "; ".join(defects) if defects else "Не указано"
+    row[2].text = "\n".join(defects) if defects else "Не указано"
     row[3].text = work_volume
 
     # Заключение и подписи
@@ -189,52 +175,45 @@ def create_defect_document(ship, equipment, defects, measurements, work_volume):
     p = doc.add_paragraph('Представитель заказчика (Судовладелец / Экипаж):')
     p.add_run(f'Старший механик т/х «{ship or "Не указано"}»		/ *[ФИО]* /')
 
-    # Сохранение в память
     file_stream = BytesIO()
     doc.save(file_stream)
     file_stream.seek(0)
     return file_stream
 
-# --- Обработчик всех текстовых сообщений (интеллектуальный ввод) ---
+# --- Обработчик всех текстовых сообщений ---
 @bot.message_handler(func=lambda message: True)
 def handle_intelligent_input(message):
     user_text = message.text
     if user_text.startswith('/'):
-        return  # Пропускаем команды, они обрабатываются отдельно
+        return
 
-    # 1. Анализ запроса
-    analysis = analyze_query(user_text)
+    # 1. Упрощённый анализ
+    analysis = simple_analyze(user_text)
     doc_type = analysis.get('document_type', 'unknown')
     ship = analysis.get('ship')
     equipment = analysis.get('equipment')
     defects = analysis.get('defects', [])
-    measurements = analysis.get('measurements', [])
 
     if doc_type == 'unknown':
-        bot.reply_to(message, "🤔 Не понял запрос. Я умею делать Акты дефектации и АВР. Просто опишите ситуацию, и я создам документы.")
+        bot.reply_to(message, "🤔 Не понял запрос. Я умею делать Акты дефектации.\n\n"
+                              "Пример: *Судно Аргака, пожарный насос, износ подшипников, течь сальника. Сделай акт.*\n"
+                              "Или просто опишите ситуацию.")
         return
 
-    # 2. Если нужно сделать Акт дефектации
-    if doc_type in ['defect', 'both']:
-        work_volume = generate_work_volume(defects, measurements)
-        file_stream = create_defect_document(ship, equipment, defects, measurements, work_volume)
-        bot.send_document(message.chat.id, file_stream, visible_file_name=f'Акт_дефектации_{ship or "судна"}.docx')
-        bot.send_message(message.chat.id, "📄 Акт дефектации в Word отправлен!")
-
-    # 3. Если нужно сделать АВР
-    if doc_type == 'avr':
-        # Пока заглушка — позже добавим полноценную генерацию АВР
-        bot.send_message(message.chat.id, "📄 АВР пока в разработке. Скоро я научусь делать и его!")
+    # 2. Генерация акта
+    work_volume = generate_work_volume(defects)
+    file_stream = create_defect_document(ship, equipment, defects, work_volume)
+    bot.send_document(message.chat.id, file_stream, visible_file_name=f'Акт_дефектации_{ship or "судна"}.docx')
+    bot.send_message(message.chat.id, "📄 Акт дефектации в Word отправлен!")
 
 # --- Команда /start ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     bot.reply_to(message, "👋 Привет! Я — твой инженерный ассистент.\n"
-                          "Просто опиши задачу: например, 'Судно Аргака, насос, сломан подшипник, сделай акт'.\n"
-                          "Я проанализирую и создам нужные документы в формате Word.\n\n"
-                          "📌 Пока я умею делать только Акты дефектации. АВР — в разработке.")
+                          "Просто опиши задачу, и я создам Акт дефектации.\n\n"
+                          "📌 Пример: 'Судно Аргака, пожарный насос, износ подшипников, течь сальника. Сделай акт.'")
 
-# --- Запуск бота ---
+# --- Запуск ---
 if __name__ == '__main__':
     print("Бот-ассистент запущен!")
     bot.infinity_polling()
