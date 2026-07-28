@@ -9,7 +9,6 @@ from docx.shared import Pt
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from io import BytesIO
 import re
-import json
 
 # --- Настройки ---
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -21,72 +20,85 @@ if not BOT_TOKEN:
 bot = telebot.TeleBot(BOT_TOKEN)
 bot.add_custom_filter(custom_filters.StateFilter(bot))
 
-# --- Упрощённый анализ запроса (без AI) ---
-def simple_analyze(text):
+# --- Анализ запроса ---
+def analyze_query(text):
     text_lower = text.lower()
     result = {
-        "document_type": "unknown",
         "ship": None,
         "equipment": None,
         "defects": [],
-        "measurements": []
+        "full_text": text
     }
-    
-    # 1. Определяем тип документа
-    if "акт" in text_lower or "дефектовк" in text_lower:
-        result["document_type"] = "defect"
-    elif "авр" in text_lower or "выполненных" in text_lower:
-        result["document_type"] = "avr"
-    else:
-        # Если нет явных слов, но есть описание дефектов — считаем дефектовкой
-        if any(word in text_lower for word in ["слом", "износ", "течь", "коррози", "трещин", "разруш"]):
-            result["document_type"] = "defect"
-    
-    # 2. Ищем судно (по ключевым словам)
+
+    # 1. Ищем судно (по ключевым словам)
     ships = ["аргака", "пластун", "славянская", "первоуральск"]
     for ship in ships:
         if ship in text_lower:
             result["ship"] = ship.capitalize()
             break
-    
-    # 3. Ищем оборудование (пытаемся найти что-то после "насос", "двигатель" и т.д.)
-    equipment_keywords = ["насос", "двигатель", "компрессор", "вентилятор", "генератор", "кран", "лебедка"]
+
+    # 2. Ищем оборудование (берём фразу между "судно" и "дефекты")
+    # Простой вариант: ищем "насос", "двигатель" и т.д.
+    equipment_keywords = ["насос", "двигатель", "компрессор", "вентилятор", "генератор", "кран", "лебедка", "редуктор"]
     for kw in equipment_keywords:
         if kw in text_lower:
-            # Берём слово перед ключевым или после
-            parts = re.split(r'[,.!?;]', text)
-            for part in parts:
-                if kw in part.lower():
-                    result["equipment"] = part.strip()
-                    break
-            if result["equipment"]:
+            # Берём 3 слова до и после ключевого
+            pattern = r'(\w+\s+){0,2}' + kw + r'(\s+\w+){0,2}'
+            match = re.search(pattern, text)
+            if match:
+                result["equipment"] = match.group(0).strip()
                 break
-    
-    # 4. Ищем дефекты (ключевые слова)
-    defect_keywords = ["износ", "течь", "коррози", "трещин", "разруш", "слом", "задир", "деформац", "ржав"]
-    for defect in defect_keywords:
-        if defect in text_lower:
-            # Извлекаем фразу с дефектом
-            for sentence in re.split(r'[,.!?;]', text):
-                if defect in sentence.lower():
-                    result["defects"].append(sentence.strip())
+
+    # 3. Определяем дефекты — всё, что находится после слов "дефекты", "зазоры", "проблемы" или в конце текста
+    # Если есть явное упоминание "дефекты:", берём текст после
+    if "дефекты" in text_lower:
+        defect_part = re.split(r'дефекты[:;]', text_lower, flags=re.IGNORECASE)
+        if len(defect_part) > 1:
+            result["defects"].append(defect_part[1].strip())
+    else:
+        # Иначе ищем фразы с типичными словами дефектов
+        defect_keywords = ["износ", "течь", "коррози", "трещин", "разруш", "зазор", "выкрашиван", "задир", "деформац", "ржав"]
+        found_defects = []
+        for sentence in re.split(r'[,.!?;]', text):
+            for kw in defect_keywords:
+                if kw in sentence.lower():
+                    found_defects.append(sentence.strip())
                     break
-    
-    if not result["defects"] and result["document_type"] != "unknown":
-        result["defects"] = ["Дефекты не указаны, требуется уточнение"]
-    
+        if found_defects:
+            result["defects"] = found_defects
+
+    # Если дефекты не найдены, но запрос похож на дефектовку — используем весь текст как описание
+    if not result["defects"] and any(word in text_lower for word in ["акт", "дефектовк"]):
+        result["defects"] = [text]
+
     return result
 
-# --- Функция генерации объёма работ через AI ---
-def generate_work_volume(defects):
-    if not GROQ_API_KEY or not defects:
+# --- Генерация объёма работ через AI ---
+def generate_work_volume(defects, full_text):
+    if not GROQ_API_KEY:
         return "Демонтаж, разборка, дефектация, замена/восстановление, сборка, монтаж, предъявление л/с."
-    
+
     try:
         client = httpx.Client(timeout=30.0)
-        defect_text = "; ".join(defects)
-        prompt = f"Составь объём работ для дефектов: {defect_text}. Включи демонтаж, разборку, замену/восстановление, сборку, монтаж, предъявление л/с. Отвечай коротко."
-        
+        defect_text = "\n".join(defects) if defects else full_text
+
+        prompt = f"""
+На основе описания дефектов составь подробный объём работ для ремонта судового оборудования.
+
+Описание дефектов:
+{defect_text}
+
+Обязательно включи в объём работ:
+1. Демонтаж узла.
+2. Разборку и дефектацию.
+3. Замену или восстановление деталей.
+4. Сборку.
+5. Монтаж.
+6. Предъявление лицу сдающему.
+
+Отвечай в виде нумерованного списка, коротко и по делу.
+"""
+
         response = client.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
@@ -103,7 +115,7 @@ def generate_work_volume(defects):
         print(f"Ошибка генерации: {e}")
         return "Демонтаж, разборка, дефектация, замена/восстановление, сборка, монтаж, предъявление л/с."
 
-# --- Функция создания Акта дефектации (Word) ---
+# --- Создание Акта дефектации (Word) ---
 def create_defect_document(ship, equipment, defects, work_volume):
     doc = Document()
     style = doc.styles['Normal']
@@ -180,28 +192,30 @@ def create_defect_document(ship, equipment, defects, work_volume):
     file_stream.seek(0)
     return file_stream
 
-# --- Обработчик всех текстовых сообщений ---
+# --- Обработчик сообщений ---
 @bot.message_handler(func=lambda message: True)
 def handle_intelligent_input(message):
     user_text = message.text
     if user_text.startswith('/'):
         return
 
-    # 1. Упрощённый анализ
-    analysis = simple_analyze(user_text)
-    doc_type = analysis.get('document_type', 'unknown')
+    # 1. Анализ запроса
+    analysis = analyze_query(user_text)
     ship = analysis.get('ship')
     equipment = analysis.get('equipment')
     defects = analysis.get('defects', [])
+    full_text = analysis.get('full_text', user_text)
 
-    if doc_type == 'unknown':
-        bot.reply_to(message, "🤔 Не понял запрос. Я умею делать Акты дефектации.\n\n"
-                              "Пример: *Судно Аргака, пожарный насос, износ подшипников, течь сальника. Сделай акт.*\n"
-                              "Или просто опишите ситуацию.")
+    # 2. Если запрос не похож на дефектовку
+    if not defects and not any(word in user_text.lower() for word in ["акт", "дефектовк", "ремонт", "судно"]):
+        bot.reply_to(message, "🤔 Я создаю Акты дефектации. Напишите что-то вроде:\n"
+                              "«Судно Аргака, насос, износ подшипников, течь сальника. Сделай акт.»")
         return
 
-    # 2. Генерация акта
-    work_volume = generate_work_volume(defects)
+    # 3. Генерация объёма работ
+    work_volume = generate_work_volume(defects, full_text)
+
+    # 4. Создание документа
     file_stream = create_defect_document(ship, equipment, defects, work_volume)
     bot.send_document(message.chat.id, file_stream, visible_file_name=f'Акт_дефектации_{ship or "судна"}.docx')
     bot.send_message(message.chat.id, "📄 Акт дефектации в Word отправлен!")
