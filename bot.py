@@ -127,15 +127,117 @@ class PumpDatabase:
                 "осев": "Регулировка или замена шестерен"
             }
         }
+        
+        # ----- Поршневые и плунжерные насосы (ОТУ-80) -----
+        self.piston = {
+            "clearances": {
+                # Табл. 7 — зазор между поршнем и цилиндром
+                "cylinder_piston": {
+                    "description": "Зазор между поршнем и цилиндром",
+                    "standard": {"min": 0.013, "max": 0.015, "unit": "мм на мм диаметра"},
+                    "max_allowed": "по табл. 7",
+                    "repair_after": "Расточка цилиндра и замена поршня"
+                },
+                # Табл. 8 — зазор в канавке поршня
+                "ring_groove": {
+                    "description": "Зазор между поршневым кольцом и канавкой поршня",
+                    "standard": {"min": 0.05, "max": 0.08, "unit": "мм"},
+                    "max_allowed": 0.25,
+                    "repair_after": "Замена поршня или расточка канавок"
+                },
+                # Табл. 11 — зазор в замке поршневого кольца
+                "ring_gap": {
+                    "description": "Зазор в замке поршневого кольца (рабочий)",
+                    "standard": {"min": 0.3, "max": 1.8, "unit": "мм (зависит от диаметра)"},
+                    "max_allowed": 4.5,
+                    "repair_after": "Замена поршневых колец"
+                },
+                # Табл. 18 — зазор крейцкопфа
+                "crosshead": {
+                    "description": "Зазор между башмаком крейцкопфа и направляющей",
+                    "standard": {"min": 0.08, "max": 0.30, "unit": "мм"},
+                    "max_allowed": 0.55,
+                    "repair_after": "Замена башмаков или ремонт направляющих"
+                },
+                # Табл. 21 — зазор в коренных подшипниках
+                "main_bearing": {
+                    "description": "Зазор в коренных подшипниках скольжения",
+                    "standard": {"min": 0.05, "max": 0.16, "unit": "мм (зависит от диаметра)"},
+                    "max_allowed": 0.26,
+                    "repair_after": "Перезаливка или замена вкладышей"
+                },
+                # Табл. 22 — зазор в шатунных подшипниках
+                "connecting_rod": {
+                    "description": "Зазор в шатунных подшипниках",
+                    "standard": {"min": 0.05, "max": 0.10, "unit": "мм (зависит от диаметра)"},
+                    "max_allowed": 0.18,
+                    "repair_after": "Перезаливка или замена вкладышей"
+                },
+                # Табл. 19 — осевой зазор подшипников качения
+                "axial_bearing": {
+                    "description": "Осевой зазор подшипников качения",
+                    "standard": {"min": 0.06, "max": 0.12, "unit": "мм (зависит от диаметра)"},
+                    "max_allowed": 0.18,
+                    "repair_after": "Замена подшипника"
+                },
+                # Табл. 12 — износ грундбуксы
+                "seal_wear": {
+                    "description": "Допустимый износ грундбуксы (сальника)",
+                    "standard": {"min": 0, "max": 1.85, "unit": "мм (зависит от диаметра)"},
+                    "max_allowed": 4.6,
+                    "repair_after": "Замена грундбуксы или расточка"
+                }
+            },
+            "common_defects": [
+                "износ зеркала цилиндра",
+                "износ поршневых колец",
+                "износ поршня",
+                "износ штока или плунжера",
+                "износ сальникового уплотнения",
+                "износ всасывающих и нагнетательных клапанов",
+                "износ крейцкопфа и его башмаков",
+                "износ шатунных подшипников",
+                "износ коренных подшипников",
+                "износ коленчатого вала",
+                "износ направляющих крейцкопфа",
+                "износ золотниковой втулки (для паровых)",
+                "трещины в цилиндре",
+                "трещины в поршне",
+                "трещины в штоке",
+                "потеря упругости пружин клапанов",
+                "заедание перепускного клапана",
+                "течь уплотнений штока",
+                "повышенная вибрация",
+                "перегрев подшипников"
+            ],
+            "repair_methods": {
+                "цилиндр": "Расточка и шлифовка зеркала или замена втулки",
+                "кольцо": "Замена поршневых колец",
+                "поршень": "Замена поршня или восстановление канавок",
+                "шток": "Шлифовка или замена штока",
+                "плунжер": "Шлифовка или замена плунжера",
+                "сальник": "Замена сальниковой набивки или грундбуксы",
+                "клапан": "Притирка или замена клапана и седла",
+                "крейцкопф": "Замена башмаков или ремонт направляющих",
+                "подшипник": "Перезаливка или замена вкладышей",
+                "вал": "Шлифовка шеек или замена вала",
+                "золотник": "Шлифовка или замена золотника и втулки",
+                "пружина": "Замена пружин клапанов",
+                "перепускной": "Разборка, чистка, регулировка клапана",
+                "направляющая": "Шаберная обработка или замена направляющих"
+            }
+        }
 
     def get_pump_types(self):
-        return ["centrifugal", "gear"]
+        return ["centrifugal", "gear", "piston"]
 
     def get_clearances(self, pump_type, clearance_type):
         if pump_type == "centrifugal":
             return self.centrifugal["clearances"].get(clearance_type)
         elif pump_type == "gear":
             return self.gear["clearances"].get(clearance_type)
+        elif pump_type == "piston":
+            return self.piston["clearances"].get(clearance_type)
         return None
 
     def check_clearance(self, pump_type, clearance_type, measured_value):
@@ -148,32 +250,46 @@ class PumpDatabase:
             }
         
         standard = clearance_data["standard"]
-        max_allowed = clearance_data["max_allowed"]
+        max_allowed = clearance_data.get("max_allowed")
         repair_after = clearance_data.get("repair_after", "Требуется ремонт")
         
-        if measured_value < standard["min"]:
+        # Если max_allowed — строка (например, "по табл. 7"), выводим предупреждение
+        if isinstance(max_allowed, str):
+            return {
+                "status": "info",
+                "message": f"📌 {clearance_data['description']}\n"
+                          f"Норма: {standard['min']}-{standard['max']} {standard.get('unit', 'мм')}\n"
+                          f"Измерено: {measured_value} мм",
+                "action": f"Сверьте с таблицей ТУ. Рекомендация: {repair_after}"
+            }
+        
+        # Числовая проверка
+        standard_min = standard.get("min", 0)
+        standard_max = standard.get("max", 0)
+        
+        if measured_value < standard_min:
             return {
                 "status": "warning",
-                "message": f"Зазор МЕНЬШЕ нормы: {measured_value} мм (норма: {standard['min']}-{standard['max']} мм)",
+                "message": f"⚠️ Зазор МЕНЬШЕ нормы: {measured_value} мм (норма: {standard_min}-{standard_max} мм)",
                 "action": "Проверьте точность измерения"
             }
-        elif measured_value <= standard["max"]:
+        elif measured_value <= standard_max:
             return {
                 "status": "ok",
-                "message": f"Зазор В НОРМЕ: {measured_value} мм (норма: {standard['min']}-{standard['max']} мм)",
+                "message": f"✅ Зазор В НОРМЕ: {measured_value} мм (норма: {standard_min}-{standard_max} мм)",
                 "action": "Деталь работоспособна"
             }
         elif measured_value <= max_allowed:
             return {
                 "status": "critical",
-                "message": f"Зазор ПРЕВЫШЕН (допустимый предел): {measured_value} мм (макс: {max_allowed} мм)",
-                "action": f"Рекомендуется ремонт: {repair_after}"
+                "message": f"🔴 Зазор ПРЕВЫШЕН (допустимый предел): {measured_value} мм (макс: {max_allowed} мм)",
+                "action": f"⚠️ Рекомендуется ремонт: {repair_after}"
             }
         else:
             return {
                 "status": "fatal",
-                "message": f"Зазор КРИТИЧЕСКИ превышен: {measured_value} мм (макс: {max_allowed} мм)",
-                "action": f"Требуется срочная замена: {repair_after}"
+                "message": f"❌ Зазор КРИТИЧЕСКИ превышен: {measured_value} мм (макс: {max_allowed} мм)",
+                "action": f"🚨 Требуется срочная замена: {repair_after}"
             }
 
     def get_common_defects(self, pump_type):
@@ -181,6 +297,8 @@ class PumpDatabase:
             return self.centrifugal["common_defects"]
         elif pump_type == "gear":
             return self.gear["common_defects"]
+        elif pump_type == "piston":
+            return self.piston["common_defects"]
         return []
 
     def get_repair_method(self, pump_type, defect_text):
@@ -193,7 +311,20 @@ class PumpDatabase:
             for key, method in self.gear["repair_methods"].items():
                 if key in defect_lower:
                     return method
+        elif pump_type == "piston":
+            for key, method in self.piston["repair_methods"].items():
+                if key in defect_lower:
+                    return method
         return None
+
+    def get_pump_name(self, pump_type):
+        """Возвращает русское название типа насоса"""
+        names = {
+            "centrifugal": "центробежный",
+            "gear": "шестерёнчатый",
+            "piston": "поршневой или плунжерный"
+        }
+        return names.get(pump_type, pump_type)
 
 # Создаём экземпляр базы
 pump_db = PumpDatabase()
@@ -212,21 +343,36 @@ def detect_ship(text):
     return None
 
 def detect_pump_type(text):
-    """Определяет тип насоса по тексту"""
+    """Определяет тип насоса по тексту (расширенная версия)"""
     text_lower = text.lower()
+    
+    # Поршневые и плунжерные
+    piston_keywords = ["поршн", "плунж", "прямодейств", "паровой"]
+    for kw in piston_keywords:
+        if kw in text_lower:
+            return "piston"
+    
+    # Шестерёнчатые
     gear_keywords = ["шестерен", "шестерн", "ротан", "rotan", "зубчат", "маслян"]
     for kw in gear_keywords:
         if kw in text_lower:
             return "gear"
+    
+    # Центробежные
     centrifugal_keywords = ["центробеж", "центр", "крыльчатк"]
     for kw in centrifugal_keywords:
         if kw in text_lower:
             return "centrifugal"
+    
+    # Если есть "насос" но тип не определён
     if "насос" in text_lower:
-        if "маслян" in text_lower:
+        if any(kw in text_lower for kw in ["маслян", "ротан"]):
             return "gear"
-        if "крыльчатк" in text_lower:
+        if any(kw in text_lower for kw in ["крыльчатк", "центр"]):
             return "centrifugal"
+        if any(kw in text_lower for kw in ["поршн", "плунж"]):
+            return "piston"
+    
     return None
 
 def extract_equipment(text):
@@ -247,12 +393,30 @@ def extract_clearances_from_text(text):
     """Извлекает все зазоры из текста"""
     text_lower = text.lower()
     clearances = []
+    
+    # Паттерны для извлечения зазоров
     patterns = [
         r'зазор\s+(\w+)\s+(\d+\.?\d*)',
         r'(\w+)\s+зазор\s+(\d+\.?\d*)',
         r'зазор\s+(\d+\.?\d*)\s+(\w+)',
         r'зазор\s+(\d+\.?\d*)',
     ]
+    
+    # Маппинг русских названий зазоров
+    clearance_map = {
+        "радиальн": "radial",
+        "осев": "axial", 
+        "подшипник": "bearing",
+        "сальник": "seal",
+        "цилиндр": "cylinder_piston",
+        "канавк": "ring_groove",
+        "замк": "ring_gap",
+        "крейцкопф": "crosshead",
+        "коренн": "main_bearing",
+        "шатун": "connecting_rod",
+        "грундбукс": "seal_wear"
+    }
+    
     for pattern in patterns:
         matches = re.findall(pattern, text_lower)
         for match in matches:
@@ -263,15 +427,10 @@ def extract_clearances_from_text(text):
                 for part in parts:
                     if re.match(r'^\d+\.?\d*$', part):
                         value = float(part)
-                    elif part in ["radial", "axial", "bearing", "seal", 
-                                 "радиальн", "осев", "подшипник", "сальник"]:
-                        clearance_map = {
-                            "радиальн": "radial",
-                            "осев": "axial", 
-                            "подшипник": "bearing",
-                            "сальник": "seal"
-                        }
-                        clearance_type = clearance_map.get(part, part)
+                    elif part in clearance_map:
+                        clearance_type = clearance_map[part]
+                    elif part in ["radial", "axial", "bearing", "seal"]:
+                        clearance_type = part
                 if value is not None:
                     clearances.append({
                         "type": clearance_type or "unknown",
@@ -280,17 +439,10 @@ def extract_clearances_from_text(text):
                     })
             else:
                 if re.match(r'^\d+\.?\d*$', match):
-                    for ct in ["radial", "axial", "bearing", "seal", 
-                              "радиальн", "осев", "подшипник", "сальник"]:
+                    for ct, mapped in clearance_map.items():
                         if ct in text_lower:
-                            clearance_map = {
-                                "радиальн": "radial",
-                                "осев": "axial",
-                                "подшипник": "bearing", 
-                                "сальник": "seal"
-                            }
                             clearances.append({
-                                "type": clearance_map.get(ct, ct),
+                                "type": mapped,
                                 "value": float(match),
                                 "raw": match
                             })
@@ -314,22 +466,27 @@ def extract_defects(text):
             if defects:
                 return defects
     
-    # 2. Ищем по ключевым словам
+    # 2. Ищем по ключевым словам (расширенный список для поршневых)
     defect_keywords = {
-        "износ": ["подшипник", "крыльчатк", "вал", "шестерн", "зуб", "сальник", "втулк"],
-        "течь": ["сальник", "уплотнен"],
-        "коррози": ["корпус"],
-        "трещин": ["корпус", "вал"],
-        "разруш": ["шестерн", "зуб"],
-        "выкрашиван": ["шестерн", "зуб"],
-        "задир": ["вал", "шестерн"],
-        "деформац": ["вал", "корпус"],
+        "износ": ["подшипник", "крыльчатк", "вал", "шестерн", "зуб", "сальник", "втулк",
+                 "цилиндр", "поршн", "шток", "плунж", "кольц", "клапан", "крейцкопф",
+                 "направляющ", "золотник"],
+        "течь": ["сальник", "уплотнен", "шток", "клапан"],
+        "коррози": ["корпус", "цилиндр", "вал"],
+        "трещин": ["корпус", "вал", "цилиндр", "поршн", "шток"],
+        "разруш": ["шестерн", "зуб", "клапан"],
+        "выкрашиван": ["шестерн", "зуб", "клапан"],
+        "задир": ["вал", "шестерн", "цилиндр"],
+        "деформац": ["вал", "корпус", "шток"],
         "ржав": ["корпус"],
-        "люфт": ["вал", "подшипник"],
+        "люфт": ["вал", "подшипник", "крейцкопф"],
         "биение": ["вал"],
-        "стук": ["подшипник"],
+        "стук": ["подшипник", "клапан"],
         "вибрац": ["подшипник"],
-        "зазор": ["радиальн", "осев", "подшипник", "сальник"]
+        "зазор": ["радиальн", "осев", "подшипник", "сальник", "цилиндр", "канавк", "замк"],
+        "перегрев": ["подшипник", "сальник"],
+        "заедание": ["клапан", "золотник"],
+        "потеря упругост": ["пружина", "кольцо"]
     }
     
     found_defects = []
@@ -344,7 +501,7 @@ def extract_defects(text):
                     if context in sentence_lower:
                         defect_desc = sentence.strip()
                         if keyword == "зазор":
-                            for ct in ["радиальн", "осев", "подшипник", "сальник"]:
+                            for ct in ["радиальн", "осев", "подшипник", "сальник", "цилиндр", "канавк", "замк"]:
                                 if ct in sentence_lower:
                                     defect_desc = f"{keyword} {ct}: {sentence.strip()}"
                                     break
@@ -370,39 +527,31 @@ def parse_works_for_avr(text):
     works = []
     text_lower = text.lower()
     
-    # Убираем маркеры "АВР", "сделай авр" и т.д.
     clean_text = re.sub(r'(авр|акт выполненных|сделай авр|создай авр|оформи авр)\s*', '', text_lower, flags=re.IGNORECASE)
     clean_text = re.sub(r'по судну\s+\w+\s*', '', clean_text)
     clean_text = re.sub(r'судно\s+\w+\s*', '', clean_text)
     clean_text = clean_text.strip()
     
-    # Разбиваем на работы по номерам или маркерам
     lines = re.split(r'\n|\.\s+|;\s+', clean_text)
     
     for line in lines:
         line = line.strip()
-        if not line:
-            continue
-        if len(line) < 5:
+        if not line or len(line) < 5:
             continue
         
-        # Пытаемся извлечь работу
         work = {"name": "", "description": "", "quantity": "", "unit": "", "note": ""}
         
-        # Ищем количество
         quantity_match = re.search(r'(\d+)\s*(шт|компл|м|кг|л|шт\.|компл\.|м\.|кг\.|л\.)', line)
         if quantity_match:
             work["quantity"] = quantity_match.group(1)
             work["unit"] = quantity_match.group(2).replace('.', '')
             line = line.replace(quantity_match.group(0), '').strip()
         
-        # Ищем примечание (в скобках)
         note_match = re.search(r'\([^)]+\)', line)
         if note_match:
             work["note"] = note_match.group(0).strip('()')
             line = line.replace(note_match.group(0), '').strip()
         
-        # Разделяем на название и описание
         if ':' in line or '—' in line or '-' in line:
             parts = re.split(r':\s*|—\s*|-\s*', line, 1)
             if len(parts) == 2:
@@ -411,7 +560,6 @@ def parse_works_for_avr(text):
             else:
                 work["description"] = line.capitalize()
         else:
-            # Если нет разделителя, пробуем определить по контексту
             if any(word in line for word in ["замена", "ремонт", "восстановлен", "изготовлен", "монтаж", "демонтаж"]):
                 work["name"] = "Ремонтные работы"
                 work["description"] = line.capitalize()
@@ -423,7 +571,6 @@ def parse_works_for_avr(text):
                 work["unit"] = "компл." if not work["quantity"] else ""
             works.append(work)
     
-    # Если ничего не нашли, но текст есть — создаём одну работу
     if not works and text.strip():
         works.append({
             "name": "Основные работы",
@@ -447,14 +594,12 @@ def analyze_query(text):
         "full_text": text
     }
     
-    # Если есть зазоры - добавляем их в дефекты
     if result["clearances"] and not result["defects"]:
         for c in result["clearances"]:
             result["defects"].append(f"зазор {c['type']}: {c['value']} мм")
     
-    # Если оборудование не определено, но есть насос
     if not result["equipment"] and "насос" in text.lower():
-        pump_type = "шестерёнчатый" if result["pump_type"] == "gear" else "центробежный" if result["pump_type"] else ""
+        pump_type = pump_db.get_pump_name(result["pump_type"]) if result["pump_type"] else ""
         result["equipment"] = f"насос {pump_type}".strip() if pump_type else "насос"
     
     return result
@@ -479,7 +624,7 @@ def generate_with_ai(defects, full_text, pump_type):
     
     base_info = ""
     if pump_type:
-        pump_name = "центробежный" if pump_type == "centrifugal" else "шестерёнчатый"
+        pump_name = pump_db.get_pump_name(pump_type)
         base_info += f"Тип насоса: {pump_name}\n"
         defects_list = pump_db.get_common_defects(pump_type)
         if defects_list:
@@ -595,7 +740,6 @@ def create_defect_document(ship, equipment, defects, work_volume):
     row = table.rows[1].cells
     row[0].text = '1'
     row[1].text = equipment or "Не указано"
-    # Формируем красивое описание дефектов
     if defects:
         defect_text = "\n".join([f"• {d}" for d in defects])
     else:
@@ -724,9 +868,14 @@ def send_welcome(message):
         "• Создавать Акты выполненных работ (скажи 'сделай АВР')\n"
         "• Проверять зазоры по ТУ (скажи 'проверь зазор')\n"
         "• Показывать частые дефекты (спроси 'какие дефекты')\n\n"
+        "📌 Типы насосов в базе:\n"
+        "• Центробежные\n"
+        "• Шестерёнчатые (ROTAN)\n"
+        "• Поршневые и плунжерные (ОТУ-80)\n\n"
         "📝 Примеры:\n"
-        "• 'Судно Аргака, масляный насос шестеренчатый, дефекты: износ зубьев, зазор радиальный 0.4. Сделай акт'\n"
-        "• 'АВР: Кабель-трасса: замена уголков 44 шт, болтов 194 шт. Предъявили л/с.'"
+        "• 'Судно Аргака, поршневой насос, износ цилиндра. Сделай акт'\n"
+        "• 'Проверь зазор поршневой цилиндр 0.25'\n"
+        "• 'Какие дефекты у поршневого насоса?'"
     )
 
 # ============================================================
@@ -771,7 +920,12 @@ def handle_intelligent_input(message):
                 if c['type'] != 'unknown':
                     pump_type = detect_pump_type(user_text)
                     if not pump_type:
-                        pump_type = "gear" if "шестерен" in text_lower else "centrifugal"
+                        if "шестерен" in text_lower or "ротан" in text_lower:
+                            pump_type = "gear"
+                        elif "поршн" in text_lower or "плунж" in text_lower or "паровой" in text_lower:
+                            pump_type = "piston"
+                        else:
+                            pump_type = "centrifugal"
                     result = pump_db.check_clearance(pump_type, c['type'], c['value'])
                     responses.append(f"🔹 {c['type']}: {c['value']} мм -> {result['message']}")
             if responses:
@@ -781,8 +935,9 @@ def handle_intelligent_input(message):
         
         bot.reply_to(message,
             "🔧 Чтобы проверить зазор, напишите:\n"
-            "`проверь зазор радиальный 0.25`\n"
-            "`шестерёнчатый осевой 0.4`"
+            "`проверь зазор центробежный радиальный 0.25`\n"
+            "`проверь зазор поршневой цилиндр 0.15`\n\n"
+            "Доступные зазоры для поршневых: cylinder_piston, ring_groove, ring_gap, crosshead, main_bearing, connecting_rod, seal_wear"
         )
         return
     
@@ -790,7 +945,11 @@ def handle_intelligent_input(message):
     if any(word in text_lower for word in ['какие дефекты', 'частые дефекты', 'список дефектов', 'дефекты бывают']):
         pump_type = detect_pump_type(text_lower)
         if pump_type:
-            pump_name = "центробежном" if pump_type == "centrifugal" else "шестерёнчатом"
+            pump_name = {
+                "centrifugal": "центробежном",
+                "gear": "шестерёнчатом",
+                "piston": "поршневом или плунжерном"
+            }.get(pump_type, pump_type)
             defects = pump_db.get_common_defects(pump_type)
             response = f"📋 **Частые дефекты {pump_name} насоса:**\n\n"
             for i, defect in enumerate(defects, 1):
@@ -800,10 +959,32 @@ def handle_intelligent_input(message):
             bot.reply_to(message, response, parse_mode='Markdown')
             return
         else:
-            bot.reply_to(message, "📌 Уточните тип насоса: центробежный или шестерёнчатый")
+            bot.reply_to(message, "📌 Уточните тип насоса: центробежный, шестерёнчатый или поршневой")
             return
     
-    # ---- 4. АКТ ДЕФЕКТАЦИИ ----
+    # ---- 4. НОРМАТИВЫ ----
+    if any(word in text_lower for word in ['норматив', 'норма', 'ту', 'техническ']):
+        response = "📐 **Нормативы зазоров по ТУ**\n\n"
+        for pump_type in pump_db.get_pump_types():
+            pump_name = {
+                "centrifugal": "Центробежный",
+                "gear": "Шестерёнчатый",
+                "piston": "Поршневой/плунжерный"
+            }.get(pump_type, pump_type)
+            response += f"**{pump_name} насос:**\n"
+            clearances = {
+                "centrifugal": pump_db.centrifugal["clearances"],
+                "gear": pump_db.gear["clearances"],
+                "piston": pump_db.piston["clearances"]
+            }.get(pump_type, {})
+            for ct, data in clearances.items():
+                std = data["standard"]
+                response += f"  • {ct}: {std['min']}-{std['max']} {std.get('unit', 'мм')}\n"
+            response += "\n"
+        bot.reply_to(message, response, parse_mode='Markdown')
+        return
+    
+    # ---- 5. АКТ ДЕФЕКТАЦИИ ----
     wants_act = any(word in text_lower for word in ['акт', 'дефектовк', 'сделай акт', 'оформи', 'составь', 'создай'])
     
     if wants_act:
@@ -815,26 +996,24 @@ def handle_intelligent_input(message):
         pump_type = analysis.get('pump_type')
         clearances = analysis.get('clearances', [])
         
-        # Добавляем зазоры в дефекты
         for c in clearances:
             defect_text = f"зазор {c['type']}: {c['value']} мм"
             if defect_text not in defects:
                 defects.append(defect_text)
         
-        # Если дефектов нет - ищем ключевые слова
         if not defects:
-            for kw in ["износ", "течь", "коррози", "трещин", "выкрашиван", "задир", "деформац", "люфт"]:
+            for kw in ["износ", "течь", "коррози", "трещин", "выкрашиван", "задир", "деформац", "люфт", "зазор"]:
                 if kw in text_lower:
                     defects.append(kw)
             if not defects:
                 bot.reply_to(message,
                     "🤔 Я не нашёл дефектов в вашем сообщении.\n"
-                    "Опишите дефекты: 'износ подшипников, течь сальника'"
+                    "Опишите дефекты: 'износ цилиндра, износ поршневых колец'"
                 )
                 return
         
         if not equipment:
-            pump_name = "шестерёнчатый" if pump_type == "gear" else "центробежный" if pump_type else ""
+            pump_name = pump_db.get_pump_name(pump_type) if pump_type else ""
             equipment = f"насос {pump_name}".strip() if pump_name else "насос"
         
         work_volume = generate_work_volume(defects, user_text, pump_type)
@@ -847,14 +1026,15 @@ def handle_intelligent_input(message):
         bot.send_message(message.chat.id, "📄 Акт дефектации в Word отправлен!")
         return
     
-    # ---- 5. НЕПОНЯТНО ----
+    # ---- 6. НЕПОНЯТНО ----
     bot.reply_to(message,
         "🤔 Я не понял запрос.\n\n"
         "Что нужно?\n"
         "📄 Акт дефектации — 'сделай акт'\n"
         "📋 АВР — 'сделай АВР'\n"
         "🔧 Проверить зазор — 'проверь зазор'\n"
-        "📋 Дефекты — 'какие дефекты у насоса'"
+        "📋 Дефекты — 'какие дефекты у поршневого насоса'\n"
+        "📐 Нормативы — 'нормативы зазоров'"
     )
 
 # ============================================================
@@ -863,4 +1043,6 @@ def handle_intelligent_input(message):
 
 if __name__ == '__main__':
     print("🤖 Бот-ассистент запущен!")
+    print("📌 Типы насосов в базе: центробежные, шестерёнчатые, поршневые/плунжерные")
+    print("📌 Доступные функции: ДА, АВР, проверка зазоров, дефекты, нормативы")
     bot.infinity_polling()
