@@ -14,6 +14,7 @@ if not BOT_TOKEN:
     raise ValueError("Переменная TELEGRAM_BOT_TOKEN не найдена!")
 
 bot = telebot.TeleBot(BOT_TOKEN)
+bot.add_custom_filter(custom_filters.StateFilter(bot))
 
 # --- Состояния для диалога ---
 class DefectStates(StatesGroup):
