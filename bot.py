@@ -240,7 +240,8 @@ def extract_equipment(text):
     """Извлекает название оборудования"""
     text_lower = text.lower()
     equipment_keywords = ["насос", "двигатель", "компрессор", "вентилятор", 
-                         "генератор", "кран", "лебедка", "редуктор"]
+                         "генератор", "кран", "лебедка", "редуктор", "гидромотор",
+                         "брашпиль", "котёл", "водонагреватель"]
     for kw in equipment_keywords:
         if kw in text_lower:
             pattern = r'(\w+\s+){0,2}' + kw + r'(\s+\w+){0,2}'
@@ -383,6 +384,61 @@ def extract_defects(text):
     
     return found_defects
 
+def parse_works_from_text(text):
+    """Парсит выполненные работы из текста для АВР"""
+    works = []
+    
+    # Ищем строки с номерами или маркерами
+    lines = text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        # Пытаемся найти работы по маркерам
+        if re.match(r'^\d+[\.\)]\s*', line) or line.startswith('•') or line.startswith('-'):
+            # Убираем маркер
+            work_text = re.sub(r'^(\d+[\.\)]\s*|[•\-]\s*)', '', line)
+            
+            # Пытаемся разобрать работу
+            work = {"name": "", "description": "", "quantity": "", "unit": "", "note": ""}
+            
+            # Ищем количество
+            quantity_match = re.search(r'(\d+)\s*(шт|компл|м|кг|л|шт\.|компл\.|м\.|кг\.|л\.)', work_text)
+            if quantity_match:
+                work["quantity"] = quantity_match.group(1)
+                work["unit"] = quantity_match.group(2).replace('.', '')
+                work_text = work_text.replace(quantity_match.group(0), '').strip()
+            
+            # Ищем примечание (обычно после "Прим:" или в скобках)
+            note_match = re.search(r'\([^)]+\)', work_text)
+            if note_match:
+                work["note"] = note_match.group(0).strip('()')
+                work_text = work_text.replace(note_match.group(0), '').strip()
+            
+            # Остальное - описание работы
+            if ':' in work_text:
+                parts = work_text.split(':', 1)
+                work["name"] = parts[0].strip()
+                work["description"] = parts[1].strip() if len(parts) > 1 else ''
+            else:
+                work["description"] = work_text
+            
+            if work["name"] or work["description"]:
+                works.append(work)
+    
+    # Если ничего не нашли, но есть текст - создаём одну работу
+    if not works and text.strip():
+        works.append({
+            "name": "Основные работы",
+            "description": text.strip(),
+            "quantity": "1",
+            "unit": "компл.",
+            "note": ""
+        })
+    
+    return works
+
 def analyze_query(text):
     """Полный анализ запроса"""
     text_lower = text.lower()
@@ -392,6 +448,7 @@ def analyze_query(text):
         "defects": extract_defects(text),
         "pump_type": detect_pump_type(text),
         "clearances": extract_clearances_from_text(text),
+        "works": parse_works_from_text(text),
         "full_text": text
     }
     
@@ -532,27 +589,29 @@ def create_defect_document(ship, equipment, defects, work_volume):
     p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
     p.add_run(f'№ {ship_code}-ДА-{datetime.now().strftime("%y")}-01').font.size = Pt(12)
 
-    doc.add_paragraph(f'г. Находка / борт т/х «{ship or "Не указано"}»        {date_str}')
+    doc.add_paragraph(f'г. Находка        {date_str} г.')
     doc.add_paragraph(f'Судно: Т/х «{ship or "Не указано"}»')
     doc.add_paragraph(f'Оборудование: {equipment or "Не указано"}')
     doc.add_paragraph(f'Объект работ: Текущий ремонт')
     doc.add_paragraph()
 
     # Таблица
-    doc.add_paragraph('Произведён осмотр. Выявлены следующие дефекты и определён объём работ:')
-    table = doc.add_table(rows=2, cols=4)
+    doc.add_paragraph('Произведён осмотр. Выявлены следующие дефекты и определён объём работ, подлежащих выполнению.')
+    table = doc.add_table(rows=2, cols=7)
     table.style = 'Table Grid'
     hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = '№'
-    hdr_cells[1].text = 'Позиция'
-    hdr_cells[2].text = 'Дефект / Состояние'
-    hdr_cells[3].text = 'Объём работ'
+    headers = ['№', 'Позиция', 'Дефект / Состояние', 'Объём работ', 'Ед. изм', 'Кол-во', 'Примечание']
+    for i, header in enumerate(headers):
+        hdr_cells[i].text = header
 
     row = table.rows[1].cells
     row[0].text = '1'
     row[1].text = equipment or "Не указано"
     row[2].text = "\n".join(defects) if defects else "Не указано"
     row[3].text = work_volume
+    row[4].text = 'компл.'
+    row[5].text = '1'
+    row[6].text = '---'
 
     # Заключение и подписи
     doc.add_paragraph()
@@ -560,11 +619,99 @@ def create_defect_document(ship, equipment, defects, work_volume):
     doc.add_paragraph('Детали подлежат замене/восстановлению согласно указанному объёму работ.')
 
     doc.add_paragraph()
-    p = doc.add_paragraph('Представитель подрядчика (Исполнитель):')
-    p.add_run(' Инженер-технолог / Мастер участка		/ *[ФИО]* /')
+    p = doc.add_paragraph('Представитель подрядчика:')
+    p.add_run(' Инженер-технолог / Мастер участка    / *[ФИО]* /')
 
-    p = doc.add_paragraph('Представитель заказчика (Судовладелец / Экипаж):')
-    p.add_run(f'Старший механик т/х «{ship or "Не указано"}»		/ *[ФИО]* /')
+    p = doc.add_paragraph('Представитель заказчика:')
+    p.add_run(f'Старший механик т/х «{ship or "Не указано"}»    / *[ФИО]* /')
+
+    file_stream = BytesIO()
+    doc.save(file_stream)
+    file_stream.seek(0)
+    return file_stream
+
+def create_avr_document(ship, works, executor="ООО «Новое время»", customer="АО «Бункерная компания»", location="Рейд 4ый район, г. Находка"):
+    doc = Document()
+    style = doc.styles['Normal']
+    style.font.name = 'Times New Roman'
+    style.font.size = Pt(11)
+
+    # Шапка
+    for text in [
+        "ООО «Новое время»",
+        "692906, Приморский край, г. Находка, ул. Первая, зд. 1Б",
+        "тел.: +7 (423) 662-97-79",
+        "СПП № 24.44.01.01544.171 до 01.08.2028 г."
+    ]:
+        p = doc.add_paragraph()
+        p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        run = p.add_run(text)
+        if "ООО" in text:
+            run.bold = True
+            run.font.size = Pt(14)
+        else:
+            run.font.size = Pt(11)
+
+    doc.add_paragraph()
+
+    # Заголовок
+    p = doc.add_paragraph()
+    p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    run = p.add_run('АКТ ВЫПОЛНЕННЫХ РАБОТ')
+    run.bold = True
+    run.font.size = Pt(15)
+
+    date_str = datetime.now().strftime('%d.%m.%Y')
+    ship_code = ship[:3].upper() if ship else "XXX"
+    p = doc.add_paragraph()
+    p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    p.add_run(f'№ {ship_code}-АВР-{datetime.now().strftime("%y")}-01').font.size = Pt(12)
+    
+    doc.add_paragraph(f'г. Находка        {date_str} г.')
+    doc.add_paragraph()
+    
+    # Реквизиты
+    doc.add_paragraph(f'Исполнитель: {executor}')
+    doc.add_paragraph(f'Заказчик: {customer}')
+    doc.add_paragraph(f'Судно: Т/х «{ship or "Не указано"}»')
+    doc.add_paragraph(f'Место стоянки: {location}')
+    doc.add_paragraph()
+
+    # Таблица
+    doc.add_paragraph('Выполнены следующие работы:')
+    table = doc.add_table(rows=1, cols=6)
+    table.style = 'Table Grid'
+    
+    # Заголовки таблицы
+    hdr_cells = table.rows[0].cells
+    headers = ['№ п/п', 'Наименование работ', 'Описание выполненных работ', 'Кол-во', 'Ед. изм.', 'Примечание']
+    for i, header in enumerate(headers):
+        hdr_cells[i].text = header
+    
+    # Заполняем данные
+    if works:
+        for i, work in enumerate(works, 1):
+            row = table.add_row().cells
+            row[0].text = str(i)
+            row[1].text = work.get('name', '')
+            row[2].text = work.get('description', '')
+            row[3].text = str(work.get('quantity', ''))
+            row[4].text = work.get('unit', '')
+            row[5].text = work.get('note', '')
+    
+    doc.add_paragraph()
+
+    # Подписи
+    doc.add_paragraph('Представитель подрядчика:')
+    doc.add_paragraph('Инженер-технолог / Мастер участка    / *[ФИО]* /')
+    doc.add_paragraph(f'Дата: {date_str}')
+    doc.add_paragraph()
+    
+    doc.add_paragraph('Представитель заказчика:')
+    doc.add_paragraph('Должность    / *[ФИО]* /')
+    doc.add_paragraph(f'Дата: {date_str}')
+    doc.add_paragraph()
+    doc.add_paragraph('М.П.    М.П.')
 
     file_stream = BytesIO()
     doc.save(file_stream)
@@ -580,13 +727,15 @@ def send_welcome(message):
     bot.reply_to(message, 
         "👋 Привет! Я — твой инженерный ассистент.\n\n"
         "📌 Что я умею:\n"
-        "• Создавать Акты дефектации (скажи 'сделай акт')\n"
+        "• Создавать Акты дефектации (скажи 'сделай акт' или 'ДА')\n"
+        "• Создавать Акты выполненных работ (скажи 'сделай АВР')\n"
         "• Проверять зазоры по ТУ (скажи 'проверь зазор')\n"
         "• Показывать частые дефекты (спроси 'какие дефекты')\n"
         "• Давать рекомендации по ремонту\n\n"
         "💬 Просто пиши на естественном языке — я пойму!\n\n"
         "📝 Примеры:\n"
         "• 'Судно Аргака, насос центробежный, износ подшипников. Сделай акт'\n"
+        "• 'АВР по судну Аргака: замена 44 уголков, 194 болтов. Предъявили л/с.'\n"
         "• 'Проверь зазор центробежный радиальный 0.25'\n"
         "• 'Какие дефекты у шестерёнчатого насоса?'"
     )
@@ -603,7 +752,31 @@ def handle_intelligent_input(message):
     if user_text.startswith('/'):
         return
     
-    # ---- 1. ПРОВЕРКА ЗАЗОРОВ (если явно просят проверить) ----
+    # ---- 1. АВР (если просят сделать АВР) ----
+    if any(word in text_lower for word in ['авр', 'акт выполненных', 'выполненные работы']):
+        # Извлекаем судно
+        ship = detect_ship(user_text)
+        
+        # Парсим работы из текста
+        works = parse_works_from_text(user_text)
+        
+        if not works:
+            bot.reply_to(message,
+                "🤔 Для создания АВР опишите выполненные работы:\n"
+                "Пример: 'АВР по судну Аргака: замена 44 уголков, 194 болтов. Предъявили л/с.'"
+            )
+            return
+        
+        file_stream = create_avr_document(ship, works)
+        bot.send_document(
+            message.chat.id,
+            file_stream,
+            visible_file_name=f'АВР_{ship or "судна"}.docx'
+        )
+        bot.send_message(message.chat.id, "📄 Акт выполненных работ отправлен!")
+        return
+    
+    # ---- 2. ПРОВЕРКА ЗАЗОРОВ (если явно просят проверить) ----
     if any(word in text_lower for word in ['проверь зазор', 'проверка зазора', 'какой зазор', 'норма зазора']):
         clearances = extract_clearances_from_text(user_text)
         if clearances:
@@ -614,159 +787,4 @@ def handle_intelligent_input(message):
                     if not pump_type:
                         pump_type = "gear" if "шестерен" in text_lower else "centrifugal"
                     
-                    result = pump_db.check_clearance(pump_type, c['type'], c['value'])
-                    responses.append(f"🔹 {c['type']}: {c['value']} мм -> {result['message']}")
-            
-            if responses:
-                response = "📊 **Результаты проверки зазоров:**\n\n" + "\n".join(responses)
-                bot.reply_to(message, response, parse_mode='Markdown')
-                return
-        
-        bot.reply_to(message,
-            "🔧 Чтобы проверить зазор, напишите в формате:\n"
-            "`проверь зазор радиальный 0.25`\n"
-            "`шестерёнчатый осевой 0.4`\n\n"
-            "Доступные зазоры: radial, axial, bearing, seal",
-            parse_mode='Markdown'
-        )
-        return
-    
-    # ---- 2. СОЗДАНИЕ АКТА ДЕФЕКТАЦИИ (ГЛАВНЫЙ ПРИОРИТЕТ) ----
-    wants_act = any(word in text_lower for word in [
-        'акт', 'дефектовк', 'сделай акт', 'оформи', 'составь', 
-        'создай', 'сформируй', 'нужен акт', 'акт дефектации'
-    ])
-    
-    has_repair_context = any(word in text_lower for word in ['ремонт', 'судно', 'насос', 'зазор', 'износ', 'течь'])
-    
-    if wants_act or (has_repair_context and any(word in text_lower for word in ['сделай', 'оформи', 'создай'])):
-        analysis = analyze_query(user_text)
-        
-        ship = analysis.get('ship')
-        equipment = analysis.get('equipment')
-        defects = analysis.get('defects', [])
-        pump_type = analysis.get('pump_type')
-        clearances = analysis.get('clearances', [])
-        
-        for c in clearances:
-            defect_text = f"зазор {c['type']}: {c['value']} мм"
-            if defect_text not in defects:
-                defects.append(defect_text)
-        
-        if not defects:
-            defect_keywords = ["износ", "течь", "коррози", "трещин", "разруш", 
-                              "выкрашиван", "задир", "деформац", "ржав", "люфт"]
-            for kw in defect_keywords:
-                if kw in text_lower:
-                    defects.append(f"{kw} (требуется уточнение)")
-            
-            if not defects:
-                bot.reply_to(message,
-                    "🤔 Я не нашёл дефектов в вашем сообщении.\n"
-                    "Пожалуйста, опишите дефекты подробнее.\n\n"
-                    "Пример: 'Судно Аргака, насос центробежный, износ подшипников и течь сальника. Сделай акт'"
-                )
-                return
-        
-        if not equipment:
-            pump_name = "шестерёнчатый" if pump_type == "gear" else "центробежный" if pump_type else ""
-            equipment = f"насос {pump_name}".strip() if pump_name else "насос"
-        
-        work_volume = generate_work_volume(defects, user_text, pump_type)
-        
-        file_stream = create_defect_document(ship, equipment, defects, work_volume)
-        bot.send_document(
-            message.chat.id, 
-            file_stream, 
-            visible_file_name=f'Акт_дефектации_{ship or "судна"}.docx'
-        )
-        bot.send_message(message.chat.id, "📄 Акт дефектации в Word отправлен!")
-        return
-    
-    # ---- 3. ИНФОРМАЦИЯ О ДЕФЕКТАХ (если явно спрашивают) ----
-    if any(word in text_lower for word in ['какие дефекты', 'частые дефекты', 'список дефектов', 'дефекты бывают']):
-        pump_type = detect_pump_type(text_lower)
-        if pump_type:
-            pump_name = "центробежном" if pump_type == "centrifugal" else "шестерёнчатом"
-            defects = pump_db.get_common_defects(pump_type)
-            response = f"📋 **Частые дефекты {pump_name} насоса:**\n\n"
-            for i, defect in enumerate(defects, 1):
-                method = pump_db.get_repair_method(pump_type, defect)
-                method_text = f" -> {method}" if method else ""
-                response += f"{i}. {defect}{method_text}\n"
-            bot.reply_to(message, response, parse_mode='Markdown')
-            return
-        else:
-            bot.reply_to(message,
-                "📌 Уточните тип насоса:\n"
-                "• центробежный\n"
-                "• шестерёнчатый (ротан)\n\n"
-                "Например: 'какие дефекты у центробежного насоса'"
-            )
-            return
-    
-    # ---- 4. НОРМАТИВЫ ЗАЗОРОВ ----
-    if any(word in text_lower for word in ['норматив', 'норма', 'ту', 'техническ']):
-        response = "📐 **Нормативы зазоров по ТУ**\n\n"
-        for pump_type in pump_db.get_pump_types():
-            pump_name = "Центробежный" if pump_type == "centrifugal" else "Шестерёнчатый"
-            response += f"**{pump_name} насос:**\n"
-            clearances = pump_db.centrifugal["clearances"] if pump_type == "centrifugal" else pump_db.gear["clearances"]
-            for ct, data in clearances.items():
-                std = data["standard"]
-                response += f"  • {ct}: {std['min']}-{std['max']} {std['unit']}\n"
-            response += "\n"
-        bot.reply_to(message, response, parse_mode='Markdown')
-        return
-    
-    # ---- 5. СПРАВКА ПО НАСОСАМ ----
-    if any(word in text_lower for word in ['насос', 'помп']):
-        pump_type = detect_pump_type(text_lower)
-        if pump_type:
-            pump_name = "центробежный" if pump_type == "centrifugal" else "шестерёнчатый"
-            response = f"📌 **Информация о {pump_name} насосе**\n\n"
-            
-            if pump_type == "centrifugal":
-                response += "• Рабочее колесо (крыльчатка)\n"
-                response += "• Корпус улиточного типа\n"
-                response += "• Подшипники качения\n"
-                response += "• Сальниковое уплотнение\n\n"
-            else:
-                response += "• Две шестерни (ведущая и ведомая)\n"
-                response += "• Корпус с перепускным клапаном\n"
-                response += "• Подшипники скольжения\n"
-                response += "• Торцевое уплотнение\n\n"
-            
-            response += "💡 Для проверки зазоров используйте:\n"
-            response += f"  `{pump_type} radial 0.15`\n"
-            response += f"  `{pump_type} axial 0.3`\n"
-            
-            bot.reply_to(message, response, parse_mode='Markdown')
-            return
-    
-    # ---- 6. НЕПОНЯТНЫЙ ЗАПРОС ----
-    bot.reply_to(message,
-        "🤔 Я не совсем понял ваш запрос.\n\n"
-        "Вот что я умею:\n"
-        "📄 **Создать акт дефектации**\n"
-        "  -> Опишите судно и дефекты, добавьте 'сделай акт'\n\n"
-        "📋 **Показать дефекты**\n"
-        "  -> Спросите 'какие дефекты у шестерёнчатого насоса'\n\n"
-        "🔧 **Проверить зазор**\n"
-        "  -> Напишите 'проверь зазор 0.25'\n\n"
-        "💬 Просто пишите на русском — я пойму!"
-    )
-
-# ============================================================
-#  ЗАПУСК
-# ============================================================
-
-if __name__ == '__main__':
-    print("🤖 Бот-ассистент запущен!")
-    print("📌 Доступные функции:")
-    print("  • Создание актов дефектации")
-    print("  • Проверка зазоров по ТУ")
-    print("  • Информация о дефектах")
-    print("  • Нормативы зазоров")
-    print("  • Свободное общение")
-    bot.infinity_polling()
+                    result = pump_db.check
