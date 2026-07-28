@@ -787,4 +787,162 @@ def handle_intelligent_input(message):
                     if not pump_type:
                         pump_type = "gear" if "шестерен" in text_lower else "centrifugal"
                     
-                    result = pump_db.check
+                    result = pump_db.check_clearance(pump_type, c['type'], c['value'])
+                    responses.append(f"🔹 {c['type']}: {c['value']} мм -> {result['message']}")
+            
+            if responses:
+                response = "📊 **Результаты проверки зазоров:**\n\n" + "\n".join(responses)
+                bot.reply_to(message, response, parse_mode='Markdown')
+                return
+        
+        bot.reply_to(message,
+            "🔧 Чтобы проверить зазор, напишите в формате:\n"
+            "`проверь зазор радиальный 0.25`\n"
+            "`шестерёнчатый осевой 0.4`\n\n"
+            "Доступные зазоры: radial, axial, bearing, seal",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # ---- 3. СОЗДАНИЕ АКТА ДЕФЕКТАЦИИ (ГЛАВНЫЙ ПРИОРИТЕТ) ----
+    wants_act = any(word in text_lower for word in [
+        'акт', 'дефектовк', 'сделай акт', 'оформи', 'составь', 
+        'создай', 'сформируй', 'нужен акт', 'акт дефектации'
+    ])
+    
+    has_repair_context = any(word in text_lower for word in ['ремонт', 'судно', 'насос', 'зазор', 'износ', 'течь'])
+    
+    if wants_act or (has_repair_context and any(word in text_lower for word in ['сделай', 'оформи', 'создай'])):
+        analysis = analyze_query(user_text)
+        
+        ship = analysis.get('ship')
+        equipment = analysis.get('equipment')
+        defects = analysis.get('defects', [])
+        pump_type = analysis.get('pump_type')
+        clearances = analysis.get('clearances', [])
+        
+        for c in clearances:
+            defect_text = f"зазор {c['type']}: {c['value']} мм"
+            if defect_text not in defects:
+                defects.append(defect_text)
+        
+        if not defects:
+            defect_keywords = ["износ", "течь", "коррози", "трещин", "разруш", 
+                              "выкрашиван", "задир", "деформац", "ржав", "люфт"]
+            for kw in defect_keywords:
+                if kw in text_lower:
+                    defects.append(f"{kw} (требуется уточнение)")
+            
+            if not defects:
+                bot.reply_to(message,
+                    "🤔 Я не нашёл дефектов в вашем сообщении.\n"
+                    "Пожалуйста, опишите дефекты подробнее.\n\n"
+                    "Пример: 'Судно Аргака, насос центробежный, износ подшипников и течь сальника. Сделай акт'"
+                )
+                return
+        
+        if not equipment:
+            pump_name = "шестерёнчатый" if pump_type == "gear" else "центробежный" if pump_type else ""
+            equipment = f"насос {pump_name}".strip() if pump_name else "насос"
+        
+        work_volume = generate_work_volume(defects, user_text, pump_type)
+        
+        file_stream = create_defect_document(ship, equipment, defects, work_volume)
+        bot.send_document(
+            message.chat.id, 
+            file_stream, 
+            visible_file_name=f'Акт_дефектации_{ship or "судна"}.docx'
+        )
+        bot.send_message(message.chat.id, "📄 Акт дефектации в Word отправлен!")
+        return
+    
+    # ---- 4. ИНФОРМАЦИЯ О ДЕФЕКТАХ (если явно спрашивают) ----
+    if any(word in text_lower for word in ['какие дефекты', 'частые дефекты', 'список дефектов', 'дефекты бывают']):
+        pump_type = detect_pump_type(text_lower)
+        if pump_type:
+            pump_name = "центробежном" if pump_type == "centrifugal" else "шестерёнчатом"
+            defects = pump_db.get_common_defects(pump_type)
+            response = f"📋 **Частые дефекты {pump_name} насоса:**\n\n"
+            for i, defect in enumerate(defects, 1):
+                method = pump_db.get_repair_method(pump_type, defect)
+                method_text = f" -> {method}" if method else ""
+                response += f"{i}. {defect}{method_text}\n"
+            bot.reply_to(message, response, parse_mode='Markdown')
+            return
+        else:
+            bot.reply_to(message,
+                "📌 Уточните тип насоса:\n"
+                "• центробежный\n"
+                "• шестерёнчатый (ротан)\n\n"
+                "Например: 'какие дефекты у центробежного насоса'"
+            )
+            return
+    
+    # ---- 5. НОРМАТИВЫ ЗАЗОРОВ ----
+    if any(word in text_lower for word in ['норматив', 'норма', 'ту', 'техническ']):
+        response = "📐 **Нормативы зазоров по ТУ**\n\n"
+        for pump_type in pump_db.get_pump_types():
+            pump_name = "Центробежный" if pump_type == "centrifugal" else "Шестерёнчатый"
+            response += f"**{pump_name} насос:**\n"
+            clearances = pump_db.centrifugal["clearances"] if pump_type == "centrifugal" else pump_db.gear["clearances"]
+            for ct, data in clearances.items():
+                std = data["standard"]
+                response += f"  • {ct}: {std['min']}-{std['max']} {std['unit']}\n"
+            response += "\n"
+        bot.reply_to(message, response, parse_mode='Markdown')
+        return
+    
+    # ---- 6. СПРАВКА ПО НАСОСАМ ----
+    if any(word in text_lower for word in ['насос', 'помп']):
+        pump_type = detect_pump_type(text_lower)
+        if pump_type:
+            pump_name = "центробежный" if pump_type == "centrifugal" else "шестерёнчатый"
+            response = f"📌 **Информация о {pump_name} насосе**\n\n"
+            
+            if pump_type == "centrifugal":
+                response += "• Рабочее колесо (крыльчатка)\n"
+                response += "• Корпус улиточного типа\n"
+                response += "• Подшипники качения\n"
+                response += "• Сальниковое уплотнение\n\n"
+            else:
+                response += "• Две шестерни (ведущая и ведомая)\n"
+                response += "• Корпус с перепускным клапаном\n"
+                response += "• Подшипники скольжения\n"
+                response += "• Торцевое уплотнение\n\n"
+            
+            response += "💡 Для проверки зазоров используйте:\n"
+            response += f"  `{pump_type} radial 0.15`\n"
+            response += f"  `{pump_type} axial 0.3`\n"
+            
+            bot.reply_to(message, response, parse_mode='Markdown')
+            return
+    
+    # ---- 7. НЕПОНЯТНЫЙ ЗАПРОС ----
+    bot.reply_to(message,
+        "🤔 Я не совсем понял ваш запрос.\n\n"
+        "Вот что я умею:\n"
+        "📄 **Создать акт дефектации**\n"
+        "  -> Опишите судно и дефекты, добавьте 'сделай акт'\n\n"
+        "📋 **Создать АВР**\n"
+        "  -> Опишите работы, добавьте 'сделай АВР'\n\n"
+        "📋 **Показать дефекты**\n"
+        "  -> Спросите 'какие дефекты у шестерёнчатого насоса'\n\n"
+        "🔧 **Проверить зазор**\n"
+        "  -> Напишите 'проверь зазор 0.25'\n\n"
+        "💬 Просто пишите на русском — я пойму!"
+    )
+
+# ============================================================
+#  ЗАПУСК
+# ============================================================
+
+if __name__ == '__main__':
+    print("🤖 Бот-ассистент запущен!")
+    print("📌 Доступные функции:")
+    print("  • Создание актов дефектации (ДА)")
+    print("  • Создание актов выполненных работ (АВР)")
+    print("  • Проверка зазоров по ТУ")
+    print("  • Информация о дефектах")
+    print("  • Нормативы зазоров")
+    print("  • Свободное общение")
+    bot.infinity_polling()
