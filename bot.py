@@ -576,17 +576,20 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     date_str = datetime.now().strftime('%d.%m.%Y')
     ship_code = ship[:3].upper() if ship else "XXX"
     
-    # 1. Удаляем плейсхолдер {{table}} и весь HTML-код вокруг него
-    for paragraph in doc.paragraphs:
+    # 1. Находим параграф с {{table}} и запоминаем его индекс
+    table_paragraph_index = None
+    for i, paragraph in enumerate(doc.paragraphs):
         if "{{table}}" in paragraph.text:
-            # Очищаем параграф, но сохраняем его, чтобы вставить таблицу
+            table_paragraph_index = i
+            # Очищаем параграф, чтобы потом вставить таблицу
             paragraph.text = ""
             break
     
     # 2. Собираем данные для таблицы
     rows_data = build_defect_table(pump_type, defects, work_volume)
     
-    # 3. Создаём таблицу НАТИВНО через python-docx
+    # 3. Создаём таблицу через python-docx
+    # Сначала создаём таблицу (она пока в конце)
     table = doc.add_table(rows=1, cols=7)
     table.autofit = False
     table.allow_autofit = False
@@ -634,7 +637,13 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
         row[5].text = row_data["qty"]
         row[6].text = "—"
     
-    # 4. Подставляем остальные плейсхолдеры
+    # 4. Перемещаем таблицу на место удалённого плейсхолдера
+    if table_paragraph_index is not None:
+        target_paragraph = doc.paragraphs[table_paragraph_index]
+        tbl = table._tbl
+        target_paragraph._element.addprevious(tbl)
+    
+    # 5. Подставляем остальные плейсхолдеры
     placeholders = {
         "ship_code": ship_code,
         "number": str(number).zfill(2),
@@ -653,10 +662,27 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     doc.save(file_stream)
     file_stream.seek(0)
     return file_stream
+
+
+def create_avr_document(ship, works, executor="ООО «Новое время»", customer="АО «Бункерная компания»", location="Рейд 4ый район, г. Находка"):
+    doc = load_template("avr_template.docx")
     
-        # Создаём таблицу АВР
+    number = get_counter("avr")
+    update_counter("avr", number)
+    
+    date_str = datetime.now().strftime('%d.%m.%Y')
+    ship_code = ship[:3].upper() if ship else "XXX"
+    
+    # 1. Находим параграф с {{table}} и запоминаем его индекс
+    table_paragraph_index = None
+    for i, paragraph in enumerate(doc.paragraphs):
+        if "{{table}}" in paragraph.text:
+            table_paragraph_index = i
+            paragraph.text = ""
+            break
+    
+    # 2. Создаём таблицу АВР
     table = doc.add_table(rows=1, cols=6)
-    # table.style = 'Table Normal'  # Удаляем — стиль не всегда существует
     table.autofit = False
     table.allow_autofit = False
     
@@ -688,6 +714,13 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
         row[4].text = "компл."
         row[5].text = ""
     
+    # 3. Перемещаем таблицу на место удалённого плейсхолдера
+    if table_paragraph_index is not None:
+        target_paragraph = doc.paragraphs[table_paragraph_index]
+        tbl = table._tbl
+        target_paragraph._element.addprevious(tbl)
+    
+    # 4. Подставляем плейсхолдеры
     placeholders = {
         "ship_code": ship_code,
         "number": str(number).zfill(2),
