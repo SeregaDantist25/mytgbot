@@ -165,7 +165,7 @@ def update_counter(doc_type, new_number):
         json.dump(counters, f, ensure_ascii=False, indent=2)
 
 # ============================================================
-#  ПОСТРОЕНИЕ ТАБЛИЦЫ (НОВАЯ ВЕРСИЯ)
+#  ПОСТРОЕНИЕ ТАБЛИЦЫ
 # ============================================================
 
 DEFECT_MAP = {
@@ -375,9 +375,16 @@ def extract_defects(text):
                 return defects
     
     defect_keywords = [
+        "поврежден", "повреждена", "повреждено", "повреждены",
+        "сгнил", "сгнила", "сгнило", "сгнили",
+        "высох", "высохла", "высохло", "высохли",
+        "треснул", "треснула", "треснуло", "треснули",
+        "сломан", "сломана", "сломано", "сломаны",
+        "разбит", "разбита", "разбито", "разбиты",
         "износ", "течь", "коррози", "трещин", "разруш", "выкрашиван", 
         "задир", "деформац", "ржав", "люфт", "биение", "стук", "вибрац",
-        "зазор", "перегрев", "заедание"
+        "зазор", "перегрев", "заедание", "отказ", "неисправн", "поломк",
+        "изгиб", "скручиван", "ослаблен", "изношен", "выработк"
     ]
     
     found_defects = []
@@ -569,7 +576,6 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     date_str = datetime.now().strftime('%d.%m.%Y')
     ship_code = ship[:3].upper() if ship else "XXX"
     
-    # Убираем плейсхолдер {{table}}
     for paragraph in doc.paragraphs:
         if "{{table}}" in paragraph.text:
             paragraph.text = ""
@@ -577,25 +583,21 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     
     rows_data = build_defect_table(pump_type, defects, work_volume)
     
-    # Создаём таблицу
     table = doc.add_table(rows=1, cols=7)
     table.style = 'Table Normal'
     table.autofit = False
     table.allow_autofit = False
     
-    # Ширина колонок в САНТИМЕТРАХ
     widths = [Cm(1.3), Cm(3.8), Cm(5.0), Cm(5.0), Cm(2.0), Cm(1.8), Cm(3.8)]
     for i, width in enumerate(widths):
         table.columns[i].width = width
     
-    # Заголовки
     headers = ['№', 'Позиция', 'Дефект / Состояние', 'Объём работ', 'Ед. изм.', 'Кол-во', 'Примечание']
     header_cells = table.rows[0].cells
     for i, header in enumerate(headers):
         header_cells[i].text = header
         header_cells[i].paragraphs[0].runs[0].bold = True
     
-    # Секции
     sections = {
         "1": "Корпус и проточная часть",
         "2": "Ротор / рабочая часть",
@@ -655,19 +657,16 @@ def create_avr_document(ship, works, executor="ООО «Новое время»"
     date_str = datetime.now().strftime('%d.%m.%Y')
     ship_code = ship[:3].upper() if ship else "XXX"
     
-    # Убираем плейсхолдер
     for paragraph in doc.paragraphs:
         if "{{table}}" in paragraph.text:
             paragraph.text = ""
             break
     
-    # Создаём таблицу АВР
     table = doc.add_table(rows=1, cols=6)
     table.style = 'Table Normal'
     table.autofit = False
     table.allow_autofit = False
     
-    # Ширина колонок в САНТИМЕТРАХ
     widths = [Cm(2.0), Cm(5.0), Cm(6.5), Cm(2.5), Cm(2.5), Cm(3.8)]
     for i, width in enumerate(widths):
         table.columns[i].width = width
@@ -712,6 +711,7 @@ def create_avr_document(ship, works, executor="ООО «Новое время»"
     doc.save(file_stream)
     file_stream.seek(0)
     return file_stream
+
 # ============================================================
 #  КОМАНДА /START
 # ============================================================
@@ -842,7 +842,7 @@ def handle_intelligent_input(message):
         bot.reply_to(message, response, parse_mode='Markdown')
         return
     
-# ---- 6. АКТ ДЕФЕКТАЦИИ ----
+    # ---- 6. АКТ ДЕФЕКТАЦИИ ----
     wants_act = any(word in text_lower for word in ['акт', 'дефектовк', 'сделай акт', 'оформи', 'составь', 'создай'])
     
     if wants_act:
@@ -888,7 +888,6 @@ def handle_intelligent_input(message):
             if len(error_text) > 4000:
                 error_text = error_text[:4000] + "\n\n... (обрезано)"
             bot.send_message(message.chat.id, error_text)
-            # Пишем в логи Railway
             print(error_text)
         return
     
