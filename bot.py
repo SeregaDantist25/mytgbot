@@ -576,6 +576,7 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     date_str = datetime.now().strftime('%d.%m.%Y')
     ship_code = ship[:3].upper() if ship else "XXX"
     
+    # Убираем плейсхолдер {{table}} из шаблона
     for paragraph in doc.paragraphs:
         if "{{table}}" in paragraph.text:
             paragraph.text = ""
@@ -583,8 +584,8 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     
     rows_data = build_defect_table(pump_type, defects, work_volume)
     
+    # Создаём таблицу НАТИВНО через python-docx
     table = doc.add_table(rows=1, cols=7)
-    # table.style = 'Table Normal'  # Удаляем — стиль не всегда существует
     table.autofit = False
     table.allow_autofit = False
     
@@ -592,12 +593,14 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     for i, width in enumerate(widths):
         table.columns[i].width = width
     
+    # Заголовки
     headers = ['№', 'Позиция', 'Дефект / Состояние', 'Объём работ', 'Ед. изм.', 'Кол-во', 'Примечание']
     header_cells = table.rows[0].cells
     for i, header in enumerate(headers):
         header_cells[i].text = header
         header_cells[i].paragraphs[0].runs[0].bold = True
     
+    # Секции
     sections = {
         "1": "Корпус и проточная часть",
         "2": "Ротор / рабочая часть",
