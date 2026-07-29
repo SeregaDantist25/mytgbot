@@ -5,7 +5,7 @@ from telebot import custom_filters
 import httpx
 from datetime import datetime
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Pt, Inches
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from io import BytesIO
 import re
@@ -27,13 +27,11 @@ DATA_DIR = "data"
 CHECKLISTS_FILE = os.path.join(DATA_DIR, "checklists.json")
 COUNTERS_FILE = os.path.join(DATA_DIR, "counters.json")
 
-
 # ============================================================
 #  ЗАГРУЗКА ДАННЫХ ИЗ JSON
 # ============================================================
 
 def load_checklists():
-    """Загружает чек-листы из JSON-файла"""
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR)
     
@@ -42,7 +40,6 @@ def load_checklists():
     
     with open(CHECKLISTS_FILE, 'r', encoding='utf-8') as f:
         return json.load(f)
-
 
 class PumpDatabase:
     def __init__(self):
@@ -111,25 +108,19 @@ class PumpDatabase:
                 return method
         return None
 
-
 pump_db = PumpDatabase()
-
 
 # ============================================================
 #  РАБОТА С ШАБЛОНАМИ
 # ============================================================
 
 def load_template(filename):
-    """Загружает шаблон Word из папки templates"""
     template_path = os.path.join(TEMPLATES_DIR, filename)
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"Шаблон {filename} не найден в {TEMPLATES_DIR}")
     return Document(template_path)
 
-
 def replace_placeholders(doc, placeholders):
-    """Заменяет плейсхолдеры {{variable}} в документе"""
-    # Замена в параграфах
     for paragraph in doc.paragraphs:
         for key, value in placeholders.items():
             if f"{{{{{key}}}}}" in paragraph.text:
@@ -138,7 +129,6 @@ def replace_placeholders(doc, placeholders):
                     if f"{{{{{key}}}}}" in run.text:
                         run.text = run.text.replace(f"{{{{{key}}}}}", str(value))
     
-    # Замена в таблицах
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
@@ -148,9 +138,7 @@ def replace_placeholders(doc, placeholders):
                             paragraph.text = paragraph.text.replace(f"{{{{{key}}}}}", str(value))
     return doc
 
-
 def get_counter(doc_type):
-    """Получает текущий номер для типа документа"""
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR)
     
@@ -162,9 +150,7 @@ def get_counter(doc_type):
     
     return counters.get(doc_type, 0) + 1
 
-
 def update_counter(doc_type, new_number):
-    """Обновляет номер документа"""
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR)
     
@@ -178,184 +164,96 @@ def update_counter(doc_type, new_number):
     with open(COUNTERS_FILE, 'w', encoding='utf-8') as f:
         json.dump(counters, f, ensure_ascii=False, indent=2)
 
+# ============================================================
+#  ПОСТРОЕНИЕ ТАБЛИЦЫ (НОВАЯ ВЕРСИЯ)
+# ============================================================
 
-# ============================================================
-#  ДИНАМИЧЕСКАЯ СБОРКА ТАБЛИЦЫ
-# ============================================================
+DEFECT_MAP = {
+    "крыльчатк": "2.1",
+    "крылатк": "2.1",
+    "колес": "2.1",
+    "вал": "2.2",
+    "трещин вала": "2.2",
+    "шпонк": "2.3",
+    "уплотнен": "3.1",
+    "сальник": "3.1",
+    "подшипник": "4.1",
+    "крепеж": "6.3",
+    "болт": "6.3",
+    "гайк": "6.3",
+}
 
 def build_defect_table(pump_type, defects, work_volume):
-    """
-    Собирает таблицу для Акта дефектации в зависимости от типа насоса.
-    Возвращает список строк для таблицы.
-    """
-    rows = []
+    rows = [
+        {"num": "1.1", "part": "Корпус насоса", "defect": "", "unit": "шт.", "qty": "1"},
+        {"num": "1.2", "part": "Уплотнительное кольцо", "defect": "", "unit": "шт.", "qty": "1"},
+        {"num": "1.3", "part": "Всасывающий/напорный патрубок", "defect": "", "unit": "компл.", "qty": "1"},
+    ]
     
-    # ---- Секция 1: Корпус и проточная часть (для всех) ----
-    rows.append({"num": "1.1", "part": "Корпус насоса", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
-    rows.append({"num": "1.2", "part": "Уплотнительное кольцо", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
-    rows.append({"num": "1.3", "part": "Всасывающий/напорный патрубок", "defect": "", "work": "", "unit": "компл.", "qty": "1", "note": ""})
-    
-    # ---- Секция 2: Ротор / рабочая часть (в зависимости от типа) ----
     if pump_type == "centrifugal":
-        rows.append({"num": "2.1", "part": "Рабочее колесо (крыльчатка)", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
-        rows.append({"num": "2.2", "part": "Вал насоса", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
-        rows.append({"num": "2.3", "part": "Шпонка рабочего колеса", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
+        rows.extend([
+            {"num": "2.1", "part": "Рабочее колесо (крыльчатка)", "defect": "", "unit": "шт.", "qty": "1"},
+            {"num": "2.2", "part": "Вал насоса", "defect": "", "unit": "шт.", "qty": "1"},
+            {"num": "2.3", "part": "Шпонка рабочего колеса", "defect": "", "unit": "шт.", "qty": "1"},
+        ])
     elif pump_type == "gear":
-        rows.append({"num": "2.1", "part": "Ведущая шестерня", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
-        rows.append({"num": "2.2", "part": "Ведомая шестерня", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
-        rows.append({"num": "2.3", "part": "Пальцы и втулки", "defect": "", "work": "", "unit": "компл.", "qty": "1", "note": ""})
-        rows.append({"num": "2.4", "part": "Перепускной клапан", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
+        rows.extend([
+            {"num": "2.1", "part": "Ведущая шестерня", "defect": "", "unit": "шт.", "qty": "1"},
+            {"num": "2.2", "part": "Ведомая шестерня", "defect": "", "unit": "шт.", "qty": "1"},
+            {"num": "2.3", "part": "Пальцы и втулки", "defect": "", "unit": "компл.", "qty": "1"},
+            {"num": "2.4", "part": "Перепускной клапан", "defect": "", "unit": "шт.", "qty": "1"},
+        ])
     elif pump_type == "piston":
-        rows.append({"num": "2.1", "part": "Цилиндр (зеркало)", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
-        rows.append({"num": "2.2", "part": "Поршень / плунжер", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
-        rows.append({"num": "2.3", "part": "Поршневые кольца", "defect": "", "work": "", "unit": "компл.", "qty": "1", "note": ""})
-        rows.append({"num": "2.4", "part": "Шток / плунжер", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
-        rows.append({"num": "2.5", "part": "Крейцкопф (башмаки, направляющие)", "defect": "", "work": "", "unit": "компл.", "qty": "1", "note": ""})
+        rows.extend([
+            {"num": "2.1", "part": "Цилиндр (зеркало)", "defect": "", "unit": "шт.", "qty": "1"},
+            {"num": "2.2", "part": "Поршень / плунжер", "defect": "", "unit": "шт.", "qty": "1"},
+            {"num": "2.3", "part": "Поршневые кольца", "defect": "", "unit": "компл.", "qty": "1"},
+            {"num": "2.4", "part": "Шток / плунжер", "defect": "", "unit": "шт.", "qty": "1"},
+            {"num": "2.5", "part": "Крейцкопф (башмаки, направляющие)", "defect": "", "unit": "компл.", "qty": "1"},
+        ])
     
-    # ---- Секция 3: Уплотнения (для всех) ----
-    rows.append({"num": "3.1", "part": "Уплотнение вала (сальник/торцевое)", "defect": "", "work": "", "unit": "компл.", "qty": "1", "note": ""})
+    rows.extend([
+        {"num": "3.1", "part": "Уплотнение вала (сальник/торцевое)", "defect": "", "unit": "компл.", "qty": "1"},
+        {"num": "4.1", "part": "Подшипниковый узел", "defect": "", "unit": "компл.", "qty": "1"},
+        {"num": "4.2", "part": "Корпус подшипников / крышки", "defect": "", "unit": "компл.", "qty": "1"},
+        {"num": "4.3", "part": "Масляная камера", "defect": "", "unit": "шт.", "qty": "1"},
+        {"num": "5.1", "part": "Обмотка статора", "defect": "", "unit": "шт.", "qty": "1"},
+        {"num": "5.2", "part": "Клеммная коробка и кабельный ввод", "defect": "", "unit": "компл.", "qty": "1"},
+        {"num": "5.3", "part": "Муфта соединения", "defect": "", "unit": "компл.", "qty": "1"},
+        {"num": "6.1", "part": "Обратный клапан", "defect": "", "unit": "шт.", "qty": "1"},
+        {"num": "6.2", "part": "Задвижка на всасывании", "defect": "", "unit": "шт.", "qty": "1"},
+        {"num": "6.3", "part": "Крепёж и расходные материалы", "defect": "", "unit": "компл.", "qty": "1"},
+    ])
     
-    # ---- Секция 4: Подшипники (для всех) ----
-    rows.append({"num": "4.1", "part": "Подшипниковый узел", "defect": "", "work": "", "unit": "компл.", "qty": "1", "note": ""})
-    rows.append({"num": "4.2", "part": "Корпус подшипников / крышки", "defect": "", "work": "", "unit": "компл.", "qty": "1", "note": ""})
-    rows.append({"num": "4.3", "part": "Масляная камера", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
+    # Распределяем дефекты по позициям
+    for defect in defects:
+        defect_lower = defect.lower()
+        placed = False
+        for keyword, pos in DEFECT_MAP.items():
+            if keyword in defect_lower:
+                for row in rows:
+                    if row["num"] == pos and not row["defect"]:
+                        row["defect"] = defect
+                        placed = True
+                        break
+                if placed:
+                    break
+        if not placed:
+            for row in rows:
+                if row["num"] == "1.1" and not row["defect"]:
+                    row["defect"] = defect
+                    break
     
-    # ---- Секция 5: Привод (для всех) ----
-    rows.append({"num": "5.1", "part": "Обмотка статора", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
-    rows.append({"num": "5.2", "part": "Клеммная коробка и кабельный ввод", "defect": "", "work": "", "unit": "компл.", "qty": "1", "note": ""})
-    rows.append({"num": "5.3", "part": "Муфта соединения", "defect": "", "work": "", "unit": "компл.", "qty": "1", "note": ""})
-    
-    # ---- Секция 6: Арматура (для всех) ----
-    rows.append({"num": "6.1", "part": "Обратный клапан", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
-    rows.append({"num": "6.2", "part": "Задвижка на всасывании", "defect": "", "work": "", "unit": "шт.", "qty": "1", "note": ""})
-    rows.append({"num": "6.3", "part": "Крепёж и расходные материалы", "defect": "", "work": "", "unit": "компл.", "qty": "1", "note": ""})
-    
-    # ---- Заполняем дефектами ----
-    if defects:
-        defect_index = 0
-        for row in rows:
-            if defect_index < len(defects):
-                row["defect"] = defects[defect_index]
-                defect_index += 1
-    
-    # ---- Заполняем объём работ ----
     for row in rows:
         row["work"] = work_volume
     
     return rows
-
-
-def build_avr_table(works):
-    """Собирает таблицу для АВР"""
-    rows = []
-    if works:
-        for i, work in enumerate(works, 1):
-            rows.append({
-                "num": str(i),
-                "name": work.get("name", ""),
-                "desc": work.get("description", ""),
-                "qty": str(work.get("quantity", "")),
-                "unit": work.get("unit", ""),
-                "note": work.get("note", "")
-            })
-    else:
-        rows.append({
-            "num": "1",
-            "name": "Основные работы",
-            "desc": "Выполнены работы согласно дефектации",
-            "qty": "1",
-            "unit": "компл.",
-            "note": ""
-        })
-    return rows
-
-
-def table_to_html_defect(rows):
-    """Превращает список строк в HTML-таблицу для ДА"""
-    html = """
-    <table border="1" cellpadding="4" cellspacing="0" style="width:100%; border-collapse:collapse; font-size:10pt;">
-        <tr>
-            <th style="width:5%;">№</th>
-            <th style="width:15%;">Позиция</th>
-            <th style="width:25%;">Дефект / Состояние</th>
-            <th style="width:25%;">Объём работ</th>
-            <th style="width:8%;">Ед. изм.</th>
-            <th style="width:7%;">Кол-во</th>
-            <th style="width:15%;">Примечание</th>
-        </tr>
-    """
-    
-    sections = {
-        "1": "Корпус и проточная часть",
-        "2": "Ротор / рабочая часть",
-        "3": "Уплотнения вала",
-        "4": "Подшипниковый узел",
-        "5": "Электропривод",
-        "6": "Арматура и обвязка"
-    }
-    
-    current_section = None
-    for row in rows:
-        section_key = row["num"].split(".")[0]
-        if section_key != current_section:
-            current_section = section_key
-            html += f"""
-        <tr>
-            <td colspan="7" style="text-align:center; font-weight:bold; background-color:#e8e8e8;">
-                {sections.get(section_key, '')}
-            </td>
-        </tr>"""
-        
-        html += f"""
-        <tr>
-            <td>{row["num"]}</td>
-            <td>{row["part"]}</td>
-            <td>{row["defect"] or "—"}</td>
-            <td>{row["work"] or "—"}</td>
-            <td>{row["unit"]}</td>
-            <td>{row["qty"]}</td>
-            <td>{row["note"] or "—"}</td>
-        </tr>"""
-    
-    html += "</table>"
-    return html
-
-
-def table_to_html_avr(rows):
-    """Превращает список строк в HTML-таблицу для АВР"""
-    html = """
-    <table border="1" cellpadding="4" cellspacing="0" style="width:100%; border-collapse:collapse; font-size:10pt;">
-        <tr>
-            <th style="width:8%;">№ п/п</th>
-            <th style="width:20%;">Наименование работ</th>
-            <th style="width:30%;">Описание выполненных работ</th>
-            <th style="width:10%;">Кол-во</th>
-            <th style="width:10%;">Ед. изм.</th>
-            <th style="width:22%;">Примечание</th>
-        </tr>
-    """
-    
-    for row in rows:
-        html += f"""
-        <tr>
-            <td>{row["num"]}</td>
-            <td>{row["name"]}</td>
-            <td>{row["desc"]}</td>
-            <td>{row["qty"]}</td>
-            <td>{row["unit"]}</td>
-            <td>{row["note"]}</td>
-        </tr>"""
-    
-    html += "</table>"
-    return html
-
 
 # ============================================================
 #  РАСШИРЕННЫЙ АНАЛИЗ ЗАПРОСОВ
 # ============================================================
 
 def detect_ship(text):
-    """Определяет судно по тексту"""
     text_lower = text.lower()
     ships = ["аргака", "пластун", "славянская", "первоуральск", "керчь", "краснодар"]
     for ship in ships:
@@ -363,9 +261,7 @@ def detect_ship(text):
             return ship.capitalize()
     return None
 
-
 def detect_pump_type(text):
-    """Определяет тип насоса по тексту"""
     text_lower = text.lower()
     
     piston_keywords = ["поршн", "плунж", "прямодейств", "паровой"]
@@ -393,9 +289,7 @@ def detect_pump_type(text):
     
     return None
 
-
 def extract_equipment(text):
-    """Извлекает название оборудования"""
     text_lower = text.lower()
     equipment_keywords = ["насос", "двигатель", "компрессор", "вентилятор", 
                          "генератор", "кран", "лебедка", "редуктор", "гидромотор",
@@ -408,9 +302,7 @@ def extract_equipment(text):
                 return match.group(0).strip()
     return None
 
-
 def extract_clearances_from_text(text):
-    """Извлекает все зазоры из текста"""
     text_lower = text.lower()
     clearances = []
     
@@ -467,9 +359,7 @@ def extract_clearances_from_text(text):
                             break
     return clearances
 
-
 def extract_defects(text):
-    """Извлекает дефекты из текста"""
     text_lower = text.lower()
     defects = []
     
@@ -512,9 +402,7 @@ def extract_defects(text):
     
     return []
 
-
 def parse_works_for_avr(text):
-    """Парсит выполненные работы для АВР"""
     works = []
     text_lower = text.lower()
     
@@ -573,9 +461,7 @@ def parse_works_for_avr(text):
     
     return works
 
-
 def analyze_query(text):
-    """Полный анализ запроса"""
     result = {
         "ship": detect_ship(text),
         "equipment": extract_equipment(text),
@@ -596,13 +482,11 @@ def analyze_query(text):
     
     return result
 
-
 # ============================================================
 #  ГЕНЕРАЦИЯ ОБЪЁМА РАБОТ
 # ============================================================
 
 def generate_work_volume(defects, full_text, pump_type=None):
-    """Генерирует объём работ с учётом базы данных"""
     if GROQ_API_KEY:
         try:
             return generate_with_ai(defects, full_text, pump_type)
@@ -610,9 +494,7 @@ def generate_work_volume(defects, full_text, pump_type=None):
             print(f"Ошибка AI: {e}")
     return generate_from_database(defects, pump_type)
 
-
 def generate_with_ai(defects, full_text, pump_type):
-    """Генерация через Groq AI"""
     client = httpx.Client(timeout=30.0)
     defect_text = "\n".join(defects) if defects else full_text
     
@@ -654,9 +536,7 @@ def generate_with_ai(defects, full_text, pump_type):
     else:
         return generate_from_database(defects, pump_type)
 
-
 def generate_from_database(defects, pump_type):
-    """Генерация объёма работ из базы данных"""
     lines = ["1. Демонтаж узла", "2. Разборка и дефектация"]
     if pump_type and defects:
         methods = []
@@ -676,13 +556,11 @@ def generate_from_database(defects, pump_type):
     lines.append("6. Предъявление лицу сдающему")
     return "\n".join(lines)
 
-
 # ============================================================
-#  СОЗДАНИЕ ДОКУМЕНТОВ ИЗ ШАБЛОНОВ
+#  СОЗДАНИЕ ДОКУМЕНТОВ С ТАБЛИЦЕЙ В WORD
 # ============================================================
 
 def create_defect_document(ship, equipment, defects, work_volume, pump_type=None):
-    """Создаёт Акт дефектации из шаблона с динамической таблицей"""
     doc = load_template("defect_act_template.docx")
     
     number = get_counter("da")
@@ -691,9 +569,62 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     date_str = datetime.now().strftime('%d.%m.%Y')
     ship_code = ship[:3].upper() if ship else "XXX"
     
-    # Собираем таблицу
-    table_rows = build_defect_table(pump_type, defects, work_volume)
-    table_html = table_to_html_defect(table_rows)
+    # Убираем плейсхолдер {{table}}
+    for paragraph in doc.paragraphs:
+        if "{{table}}" in paragraph.text:
+            paragraph.text = ""
+            break
+    
+    rows_data = build_defect_table(pump_type, defects, work_volume)
+    
+    # Создаём таблицу
+    table = doc.add_table(rows=1, cols=7)
+    table.style = 'Table Grid'
+    table.autofit = False
+    table.allow_autofit = False
+    
+    widths = [Inches(0.5), Inches(1.5), Inches(2.0), Inches(2.0), Inches(0.8), Inches(0.7), Inches(1.5)]
+    for i, width in enumerate(widths):
+        table.columns[i].width = width
+    
+    # Заголовки
+    headers = ['№', 'Позиция', 'Дефект / Состояние', 'Объём работ', 'Ед. изм.', 'Кол-во', 'Примечание']
+    header_cells = table.rows[0].cells
+    for i, header in enumerate(headers):
+        header_cells[i].text = header
+        header_cells[i].paragraphs[0].runs[0].bold = True
+    
+    # Секции
+    sections = {
+        "1": "Корпус и проточная часть",
+        "2": "Ротор / рабочая часть",
+        "3": "Уплотнения вала",
+        "4": "Подшипниковый узел",
+        "5": "Электропривод",
+        "6": "Арматура и обвязка"
+    }
+    
+    current_section = None
+    for row_data in rows_data:
+        section_key = row_data["num"].split(".")[0]
+        if section_key != current_section:
+            current_section = section_key
+            row = table.add_row().cells
+            for cell in row:
+                cell.text = ""
+            row[0].text = sections.get(section_key, "")
+            for cell in row:
+                cell.paragraphs[0].runs[0].bold = True
+                cell.paragraphs[0].alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        
+        row = table.add_row().cells
+        row[0].text = row_data["num"]
+        row[1].text = row_data["part"]
+        row[2].text = row_data.get("defect", "—")
+        row[3].text = row_data.get("work", "—")
+        row[4].text = row_data["unit"]
+        row[5].text = row_data["qty"]
+        row[6].text = "—"
     
     placeholders = {
         "ship_code": ship_code,
@@ -704,7 +635,6 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
         "purpose": "По назначению",
         "work_object": "Текущий ремонт",
         "basis": "По заявке",
-        "table": table_html,
         "conclusion": "Детали подлежат замене/восстановлению согласно указанному объёму работ."
     }
     
@@ -715,9 +645,7 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     file_stream.seek(0)
     return file_stream
 
-
 def create_avr_document(ship, works, executor="ООО «Новое время»", customer="АО «Бункерная компания»", location="Рейд 4ый район, г. Находка"):
-    """Создаёт АВР из шаблона с динамической таблицей"""
     doc = load_template("avr_template.docx")
     
     number = get_counter("avr")
@@ -726,8 +654,45 @@ def create_avr_document(ship, works, executor="ООО «Новое время»"
     date_str = datetime.now().strftime('%d.%m.%Y')
     ship_code = ship[:3].upper() if ship else "XXX"
     
-    table_rows = build_avr_table(works)
-    table_html = table_to_html_avr(table_rows)
+    # Убираем плейсхолдер
+    for paragraph in doc.paragraphs:
+        if "{{table}}" in paragraph.text:
+            paragraph.text = ""
+            break
+    
+    # Создаём таблицу АВР
+    table = doc.add_table(rows=1, cols=6)
+    table.style = 'Table Grid'
+    table.autofit = False
+    table.allow_autofit = False
+    
+    widths = [Inches(0.8), Inches(2.0), Inches(2.5), Inches(1.0), Inches(1.0), Inches(1.5)]
+    for i, width in enumerate(widths):
+        table.columns[i].width = width
+    
+    headers = ['№ п/п', 'Наименование работ', 'Описание выполненных работ', 'Кол-во', 'Ед. изм.', 'Примечание']
+    header_cells = table.rows[0].cells
+    for i, header in enumerate(headers):
+        header_cells[i].text = header
+        header_cells[i].paragraphs[0].runs[0].bold = True
+    
+    if works:
+        for i, work in enumerate(works, 1):
+            row = table.add_row().cells
+            row[0].text = str(i)
+            row[1].text = work.get('name', '')
+            row[2].text = work.get('description', '')
+            row[3].text = str(work.get('quantity', ''))
+            row[4].text = work.get('unit', '')
+            row[5].text = work.get('note', '')
+    else:
+        row = table.add_row().cells
+        row[0].text = "1"
+        row[1].text = "Основные работы"
+        row[2].text = "Выполнены работы согласно дефектации"
+        row[3].text = "1"
+        row[4].text = "компл."
+        row[5].text = ""
     
     placeholders = {
         "ship_code": ship_code,
@@ -737,7 +702,6 @@ def create_avr_document(ship, works, executor="ООО «Новое время»"
         "executor": executor,
         "customer": customer,
         "location": location,
-        "table": table_html
     }
     
     doc = replace_placeholders(doc, placeholders)
@@ -746,7 +710,6 @@ def create_avr_document(ship, works, executor="ООО «Новое время»"
     doc.save(file_stream)
     file_stream.seek(0)
     return file_stream
-
 
 # ============================================================
 #  КОМАНДА /START
@@ -767,7 +730,6 @@ def send_welcome(message):
         "• Шестерёнчатые (ROTAN)\n"
         "• Поршневые и плунжерные (ОТУ-80)"
     )
-
 
 # ============================================================
 #  ГЛАВНЫЙ ОБРАБОТЧИК
@@ -932,7 +894,6 @@ def handle_intelligent_input(message):
         "📐 Нормативы — 'нормативы зазоров'\n"
         "📋 Чек-лист — 'чек-лист центробежного насоса'"
     )
-
 
 # ============================================================
 #  ЗАПУСК
