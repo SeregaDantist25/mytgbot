@@ -5,7 +5,7 @@ from telebot import custom_filters
 import httpx
 from datetime import datetime
 from docx import Document
-from docx.shared import Pt, Inches
+from docx.shared import Pt, Cm
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from io import BytesIO
 import re
@@ -583,7 +583,8 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     table.autofit = False
     table.allow_autofit = False
     
-    widths = [Inches(0.5), Inches(1.5), Inches(2.0), Inches(2.0), Inches(0.8), Inches(0.7), Inches(1.5)]
+    # Ширина колонок в САНТИМЕТРАХ
+    widths = [Cm(1.3), Cm(3.8), Cm(5.0), Cm(5.0), Cm(2.0), Cm(1.8), Cm(3.8)]
     for i, width in enumerate(widths):
         table.columns[i].width = width
     
@@ -666,7 +667,8 @@ def create_avr_document(ship, works, executor="ООО «Новое время»"
     table.autofit = False
     table.allow_autofit = False
     
-    widths = [Inches(0.8), Inches(2.0), Inches(2.5), Inches(1.0), Inches(1.0), Inches(1.5)]
+    # Ширина колонок в САНТИМЕТРАХ
+    widths = [Cm(2.0), Cm(5.0), Cm(6.5), Cm(2.5), Cm(2.5), Cm(3.8)]
     for i, width in enumerate(widths):
         table.columns[i].width = width
     
@@ -710,7 +712,6 @@ def create_avr_document(ship, works, executor="ООО «Новое время»"
     doc.save(file_stream)
     file_stream.seek(0)
     return file_stream
-
 # ============================================================
 #  КОМАНДА /START
 # ============================================================
