@@ -842,46 +842,54 @@ def handle_intelligent_input(message):
         bot.reply_to(message, response, parse_mode='Markdown')
         return
     
-    # ---- 6. АКТ ДЕФЕКТАЦИИ ----
+# ---- 6. АКТ ДЕФЕКТАЦИИ ----
     wants_act = any(word in text_lower for word in ['акт', 'дефектовк', 'сделай акт', 'оформи', 'составь', 'создай'])
     
     if wants_act:
-        analysis = analyze_query(user_text)
-        
-        ship = analysis.get('ship')
-        equipment = analysis.get('equipment')
-        defects = analysis.get('defects', [])
-        pump_type = analysis.get('pump_type')
-        clearances = analysis.get('clearances', [])
-        
-        for c in clearances:
-            defect_text = f"зазор {c['type']}: {c['value']} мм"
-            if defect_text not in defects:
-                defects.append(defect_text)
-        
-        if not defects:
-            for kw in ["износ", "течь", "коррози", "трещин", "выкрашиван", "задир", "деформац", "люфт", "зазор"]:
-                if kw in text_lower:
-                    defects.append(kw)
+        try:
+            analysis = analyze_query(user_text)
+            
+            ship = analysis.get('ship')
+            equipment = analysis.get('equipment')
+            defects = analysis.get('defects', [])
+            pump_type = analysis.get('pump_type')
+            clearances = analysis.get('clearances', [])
+            
+            for c in clearances:
+                defect_text = f"зазор {c['type']}: {c['value']} мм"
+                if defect_text not in defects:
+                    defects.append(defect_text)
+            
             if not defects:
-                bot.reply_to(message,
-                    "🤔 Я не нашёл дефектов в вашем сообщении.\n"
-                    "Опишите дефекты: 'износ цилиндра, износ поршневых колец'"
-                )
-                return
-        
-        if not equipment:
-            pump_name = pump_db.get_pump_name(pump_type) if pump_type else ""
-            equipment = f"насос {pump_name}".strip() if pump_name else "насос"
-        
-        work_volume = generate_work_volume(defects, user_text, pump_type)
-        file_stream = create_defect_document(ship, equipment, defects, work_volume, pump_type)
-        bot.send_document(
-            message.chat.id, 
-            file_stream, 
-            visible_file_name=f'Акт_дефектации_{ship or "судна"}.docx'
-        )
-        bot.send_message(message.chat.id, "📄 Акт дефектации в Word отправлен!")
+                for kw in ["износ", "течь", "коррози", "трещин", "выкрашиван", "задир", "деформац", "люфт", "зазор"]:
+                    if kw in text_lower:
+                        defects.append(kw)
+                if not defects:
+                    bot.reply_to(message, "🤔 Я не нашёл дефектов в вашем сообщении. Опишите дефекты подробнее.")
+                    return
+            
+            if not equipment:
+                pump_name = pump_db.get_pump_name(pump_type) if pump_type else ""
+                equipment = f"насос {pump_name}".strip() if pump_name else "насос"
+            
+            work_volume = generate_work_volume(defects, user_text, pump_type)
+            file_stream = create_defect_document(ship, equipment, defects, work_volume, pump_type)
+            
+            bot.send_document(
+                message.chat.id, 
+                file_stream, 
+                visible_file_name=f'Акт_дефектации_{ship or "судна"}.docx'
+            )
+            bot.send_message(message.chat.id, "📄 Акт дефектации в Word отправлен!")
+            
+        except Exception as e:
+            import traceback
+            error_text = f"❌ Ошибка при создании акта:\n\n{str(e)}\n\n{traceback.format_exc()}"
+            if len(error_text) > 4000:
+                error_text = error_text[:4000] + "\n\n... (обрезано)"
+            bot.send_message(message.chat.id, error_text)
+            # Пишем в логи Railway
+            print(error_text)
         return
     
     # ---- 7. НЕПОНЯТНО ----
