@@ -584,7 +584,7 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     rows_data = build_defect_table(pump_type, defects, work_volume)
     
     table = doc.add_table(rows=1, cols=7)
-    table.style = 'Table Normal'
+    # table.style = 'Table Normal'  # Удаляем — стиль не всегда существует
     table.autofit = False
     table.allow_autofit = False
     
@@ -662,8 +662,9 @@ def create_avr_document(ship, works, executor="ООО «Новое время»"
             paragraph.text = ""
             break
     
+        # Создаём таблицу АВР
     table = doc.add_table(rows=1, cols=6)
-    table.style = 'Table Normal'
+    # table.style = 'Table Normal'  # Удаляем — стиль не всегда существует
     table.autofit = False
     table.allow_autofit = False
     
