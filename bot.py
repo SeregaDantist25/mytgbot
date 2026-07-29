@@ -579,7 +579,7 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     
     # Создаём таблицу
     table = doc.add_table(rows=1, cols=7)
-    table.style = 'Table Grid'
+    table.style = 'Table Normal'
     table.autofit = False
     table.allow_autofit = False
     
@@ -663,7 +663,7 @@ def create_avr_document(ship, works, executor="ООО «Новое время»"
     
     # Создаём таблицу АВР
     table = doc.add_table(rows=1, cols=6)
-    table.style = 'Table Grid'
+    table.style = 'Table Normal'
     table.autofit = False
     table.allow_autofit = False
     
