@@ -522,44 +522,59 @@ def analyze_query(text):
     return result
 
 # ============================================================
-#  ГЕНЕРАЦИЯ ОБЪЁМА РАБОТ
+#  ГЕНЕРАЦИЯ ОБЪЁМА РАБОТ С ИСПОЛЬЗОВАНИЕМ AI
 # ============================================================
 
-def generate_work_volume(defects, full_text, pump_type=None):
+def generate_work_volume(defects, full_text, pump_type=None, equipment_type=None):
+    """Генерирует объём работ с использованием AI"""
+    
+    # Пытаемся использовать Groq
     if GROQ_API_KEY:
         try:
-            return generate_with_ai(defects, full_text, pump_type)
+            return generate_with_ai(defects, full_text, pump_type, equipment_type)
         except Exception as e:
-            print(f"Ошибка AI: {e}")
-    return generate_from_database(defects, pump_type)
+            print(f"Ошибка AI генерации: {e}")
+            return generate_base_work_volume(defects)
+    
+    # Если нет ключа — базовый шаблон
+    return generate_base_work_volume(defects)
 
-def generate_with_ai(defects, full_text, pump_type):
+def generate_with_ai(defects, full_text, pump_type, equipment_type):
+    """Генерация объёма работ через Groq AI"""
     client = httpx.Client(timeout=30.0)
     defect_text = "\n".join(defects) if defects else full_text
     
-    base_info = ""
-    if pump_type:
-        pump_name = pump_db.get_pump_name(pump_type)
-        base_info += f"Тип насоса: {pump_name}\n"
-        defects_list = pump_db.get_common_defects(pump_type)
-        if defects_list:
-            base_info += f"Частые дефекты для этого типа: {', '.join(defects_list[:5])}\n"
+    # Определяем тип оборудования для контекста
+    equip_name = "оборудования"
+    if equipment_type == "pump":
+        equip_name = "насоса"
+        if pump_type:
+            pump_name = pump_db.get_pump_name(pump_type)
+            equip_name = f"{pump_name} насоса"
+    elif equipment_type == "engine":
+        equip_name = "двигателя"
     
     prompt = f"""
-На основе описания дефектов составь подробный объём работ для ремонта судового оборудования.
-
-{base_info}
+Ты — опытный инженер-судоремонтник. На основе описания дефектов составь подробный, конкретный объём работ для ремонта {equip_name}.
 
 Описание дефектов:
 {defect_text}
 
-Обязательно включи в объём работ в виде нумерованного списка:
-1. Демонтаж узла
-2. Разборка и дефектация
-3. Замену или восстановление деталей
-4. Сборку с проверкой зазоров
-5. Монтаж
-6. Предъявление лицу сдающему
+Требования к ответу:
+1. Ответ должен быть в виде нумерованного списка (1., 2., 3. и т.д.)
+2. Каждый пункт должен начинаться с глагола (Демонтаж, Разборка, Замена, Восстановление, Сборка, Монтаж, Проверка, Регулировка, Испытание)
+3. Указывай конкретные детали и узлы (не просто "замена деталей", а "замена поршневых колец" или "проточка седла клапана")
+4. Учитывай специфику дефектов: если есть "течь" — добавь "замена уплотнений", если "износ" — "восстановление или замена"
+5. Обязательно включи:
+   - Демонтаж узла
+   - Разборку и дефектацию всех повреждённых деталей
+   - Конкретные работы по замене/восстановлению
+   - Сборку с проверкой зазоров
+   - Монтаж
+   - Предъявление лицу сдающему
+6. Не используй общие фразы, пиши конкретно для этого случая.
+
+Ответь коротко и по делу, без лишних объяснений.
 """
 
     response = client.post(
@@ -567,32 +582,50 @@ def generate_with_ai(defects, full_text, pump_type):
         headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
         json={
             "model": "mixtral-8x7b-32768",
-            "messages": [{"role": "user", "content": prompt}]
-        }
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3
+        },
+        timeout=30.0
     )
+    
     if response.status_code == 200:
         return response.json()['choices'][0]['message']['content']
     else:
-        return generate_from_database(defects, pump_type)
+        print(f"Groq API error (work volume): {response.status_code}")
+        return generate_base_work_volume(defects)
 
-def generate_from_database(defects, pump_type):
+def generate_base_work_volume(defects):
+    """Базовый объём работ (запасной вариант)"""
     lines = ["1. Демонтаж узла", "2. Разборка и дефектация"]
-    if pump_type and defects:
-        methods = []
-        for defect in defects:
-            method = pump_db.get_repair_method(pump_type, defect)
-            if method:
-                methods.append(method)
-        if methods:
-            unique_methods = list(dict.fromkeys(methods))
-            lines.append("3. " + "; ".join(unique_methods))
-        else:
-            lines.append("3. Замена/восстановление деталей")
+    
+    # Пытаемся добавить конкретные работы по дефектам
+    work_items = []
+    for defect in defects:
+        defect_lower = defect.lower()
+        if "течь" in defect_lower or "уплотнен" in defect_lower:
+            work_items.append("замена уплотнительных элементов")
+        elif "износ" in defect_lower or "изношен" in defect_lower:
+            work_items.append("восстановление или замена изношенных деталей")
+        elif "трещин" in defect_lower:
+            work_items.append("заварка трещин или замена детали")
+        elif "коррози" in defect_lower:
+            work_items.append("зачистка и восстановление коррозионных повреждений")
+        elif "зазор" in defect_lower:
+            work_items.append("регулировка зазоров")
+        elif "протечк" in defect_lower:
+            work_items.append("замена уплотнений и проверка герметичности")
+    
+    if work_items:
+        # Убираем дубли
+        unique_items = list(dict.fromkeys(work_items))
+        lines.append("3. " + "; ".join(unique_items))
     else:
         lines.append("3. Замена/восстановление деталей")
+    
     lines.append("4. Сборка с проверкой зазоров")
     lines.append("5. Монтаж")
     lines.append("6. Предъявление лицу сдающему")
+    
     return "\n".join(lines)
 
 # ============================================================
@@ -738,7 +771,7 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     date_str = datetime.now().strftime('%d.%m.%Y')
     ship_code = ship[:3].upper() if ship else "XXX"
     
-    # Определяем тип оборудования через AI или локально
+    # Определяем тип оборудования
     equipment_type = detect_equipment_type(equipment or "")
     
     # Если тип не определён — используем насос по умолчанию
@@ -1090,7 +1123,7 @@ def handle_intelligent_input(message):
                     pump_name = pump_db.get_pump_name(pump_type) if pump_type else ""
                     equipment = f"насос {pump_name}".strip() if pump_name else "насос"
             
-            work_volume = generate_work_volume(defects, user_text, pump_type)
+            work_volume = generate_work_volume(defects, user_text, pump_type, equipment_type)
             file_stream = create_defect_document(ship, equipment, defects, work_volume, pump_type)
             
             bot.send_document(
@@ -1236,5 +1269,5 @@ if __name__ == '__main__':
     print("🤖 Бот-ассистент запущен!")
     print("📌 Типы оборудования в базе: насосы (центробежные, шестерёнчатые, поршневые), двигатели")
     print("📌 Доступные функции: ДА, АВР, проверка зазоров, дефекты, нормативы, чек-лист")
-    print("📌 Используется Groq AI для интеллектуального анализа запросов")
+    print("📌 Используется Groq AI для интеллектуального анализа запросов и генерации объёма работ")
     bot.infinity_polling()
