@@ -165,7 +165,27 @@ def update_counter(doc_type, new_number):
         json.dump(counters, f, ensure_ascii=False, indent=2)
 
 # ============================================================
-#  ПОСТРОЕНИЕ ТАБЛИЦЫ
+#  ОПРЕДЕЛЕНИЕ ТИПА ОБОРУДОВАНИЯ
+# ============================================================
+
+def detect_equipment_type(text):
+    """Определяет тип оборудования: насос, двигатель, компрессор и т.д."""
+    text_lower = text.lower()
+    if any(word in text_lower for word in ["двигател", "дизель", "мотор", "гд"]):
+        return "engine"
+    elif any(word in text_lower for word in ["компрессор", "компрес"]):
+        return "compressor"
+    elif any(word in text_lower for word in ["насос", "помп"]):
+        return "pump"
+    else:
+        return None
+
+def ask_for_clarification(equipment):
+    """Формирует вопрос для уточнения типа оборудования"""
+    return f"🔍 Я нашёл упоминание '{equipment}'. Уточните, это:\n1️⃣ Насос\n2️⃣ Двигатель\n3️⃣ Другое оборудование\n\nПросто напишите номер или название."
+
+# ============================================================
+#  ПОСТРОЕНИЕ ТАБЛИЦЫ (ДЛЯ НАСОСОВ)
 # ============================================================
 
 DEFECT_MAP = {
@@ -183,7 +203,8 @@ DEFECT_MAP = {
     "гайк": "6.3",
 }
 
-def build_defect_table(pump_type, defects, work_volume):
+def build_defect_table_pump(pump_type, defects, work_volume):
+    """Строит таблицу для насосов (7 колонок)"""
     rows = [
         {"num": "1.1", "part": "Корпус насоса", "defect": "", "unit": "шт.", "qty": "1"},
         {"num": "1.2", "part": "Уплотнительное кольцо", "defect": "", "unit": "шт.", "qty": "1"},
@@ -250,6 +271,310 @@ def build_defect_table(pump_type, defects, work_volume):
     return rows
 
 # ============================================================
+#  ПОСТРОЕНИЕ ТАБЛИЦЫ (ДЛЯ ДВИГАТЕЛЕЙ)
+# ============================================================
+
+def build_defect_table_engine(defects, work_volume):
+    """Строит таблицу для двигателей (6 колонок, как в образце)"""
+    rows = []
+    
+    # Секции
+    sections = {
+        "Цилиндропоршневая группа": [],
+        "Головка цилиндров и газораспределение": [],
+        "Системы и вспомогательное оборудование": [],
+        "Сборочные и испытательные работы": []
+    }
+    
+    # Определяем, к какой секции относится дефект
+    for i, defect in enumerate(defects, 1):
+        defect_lower = defect.lower()
+        section = None
+        
+        if any(word in defect_lower for word in ["поршн", "цилиндр", "кольц", "втулк"]):
+            section = "Цилиндропоршневая группа"
+        elif any(word in defect_lower for word in ["крышк", "клапан", "форсунк", "толкател", "газораспредел"]):
+            section = "Головка цилиндров и газораспределение"
+        elif any(word in defect_lower for word in ["рубашк", "сальник", "турбо", "масл", "охлажд"]):
+            section = "Системы и вспомогательное оборудование"
+        elif any(word in defect_lower for word in ["испытани", "сборк"]):
+            section = "Сборочные и испытательные работы"
+        else:
+            section = "Прочее"
+        
+        rows.append({
+            "num": f"{i}.{i}",
+            "defect": defect,
+            "work": work_volume,
+            "unit": "компл.",
+            "qty": "1",
+            "section": section
+        })
+    
+    return rows
+
+# ============================================================
+#  ФУНКЦИИ СОЗДАНИЯ ДОКУМЕНТОВ
+# ============================================================
+
+def create_defect_document(ship, equipment, defects, work_volume, pump_type=None):
+    """Создаёт акт дефектации с таблицей, подходящей под тип оборудования"""
+    doc = load_template("defect_act_template.docx")
+    
+    number = get_counter("da")
+    update_counter("da", number)
+    
+    date_str = datetime.now().strftime('%d.%m.%Y')
+    ship_code = ship[:3].upper() if ship else "XXX"
+    
+    # Определяем тип оборудования
+    equipment_type = detect_equipment_type(equipment)
+    
+    # Если тип не определён — используем насос по умолчанию (но лучше уточнить)
+    if equipment_type is None:
+        equipment_type = "pump"  # По умолчанию насос
+    
+    # Строим таблицу в зависимости от типа
+    if equipment_type == "pump":
+        rows_data = build_defect_table_pump(pump_type, defects, work_volume)
+        cols = 7
+        headers = ['№', 'Позиция', 'Дефект / Состояние', 'Объём работ', 'Ед. изм.', 'Кол-во', 'Примечание']
+        sections = {
+            "1": "Корпус и проточная часть",
+            "2": "Ротор / рабочая часть",
+            "3": "Уплотнения вала",
+            "4": "Подшипниковый узел",
+            "5": "Электропривод",
+            "6": "Арматура и обвязка"
+        }
+        get_section_key = lambda row: row["num"].split(".")[0]
+        # Поля для насоса
+        show_purpose = True
+        show_basis = True
+        show_conclusion = True
+        show_notes = False
+        signatures = [
+            "Представитель подрядчика (Исполнитель):",
+            "Инженер-технолог / Мастер участка      / *[ФИО]* /",
+            "Представитель заказчика (Судовладелец / Экипаж):",
+            f"Старший механик т/х «{ship or 'Не указано'}»      / *[ФИО]* /",
+            "Согласовано (при необходимости):",
+            "Инспектор РМРС      / *[ФИО]* /"
+        ]
+    else:
+        # Двигатели, компрессоры и другое — 6 колонок
+        rows_data = build_defect_table_engine(defects, work_volume)
+        cols = 6
+        headers = ['№ п/п', 'Наименование дефекта', 'Объём работ', 'Ед. изм.', 'Кол-во', 'Примечание']
+        sections = {}
+        get_section_key = lambda row: row.get("section", "Прочее")
+        # Поля для двигателя
+        show_purpose = False
+        show_basis = False
+        show_conclusion = False
+        show_notes = True
+        notes_text = "Все СЗЧ (поршневые кольца, поршни, втулка, комплекты для форсунок, РТИ) — поставка Заказчика, если не указано иное.\nРаботы по проточке и транспортировке деталей выполняются Подрядчиком за отдельную плату (акт дополнительных работ)."
+        signatures = [
+            "Представитель Подрядчика:",
+            "Инженер-технолог / Мастер участка      / *[ФИО]* /",
+            "Представитель Заказчика:",
+            "Должность      / *[ФИО]* /"
+        ]
+    
+    # Находим параграф с {{table}}
+    table_paragraph_index = None
+    for i, paragraph in enumerate(doc.paragraphs):
+        if "{{table}}" in paragraph.text:
+            table_paragraph_index = i
+            paragraph.text = ""
+            break
+    
+    # Создаём таблицу
+    table = doc.add_table(rows=1, cols=cols)
+    table.autofit = False
+    table.allow_autofit = False
+    
+    if cols == 7:
+        widths = [Cm(1.3), Cm(3.8), Cm(5.0), Cm(5.0), Cm(2.0), Cm(1.8), Cm(3.8)]
+    else:
+        widths = [Cm(1.8), Cm(5.0), Cm(6.0), Cm(2.2), Cm(2.0), Cm(3.0)]
+    
+    for i, width in enumerate(widths):
+        table.columns[i].width = width
+    
+    # Заголовки
+    header_cells = table.rows[0].cells
+    for i, header in enumerate(headers):
+        header_cells[i].text = header
+        header_cells[i].paragraphs[0].runs[0].bold = True
+        # Центрируем заголовки
+        header_cells[i].paragraphs[0].alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    
+    # Заполняем строки
+    current_section = None
+    for row_data in rows_data:
+        section_key = get_section_key(row_data)
+        if section_key != current_section:
+            current_section = section_key
+            row = table.add_row().cells
+            for cell in row:
+                cell.text = ""
+            if cols == 7:
+                row[0].text = sections.get(section_key, "")
+            else:
+                row[0].text = section_key
+            for cell in row:
+                cell.paragraphs[0].runs[0].bold = True
+                cell.paragraphs[0].alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        
+        row = table.add_row().cells
+        if cols == 7:
+            row[0].text = row_data["num"]
+            row[1].text = row_data["part"]
+            row[2].text = row_data.get("defect", "—")
+            row[3].text = row_data.get("work", "—")
+            row[4].text = row_data["unit"]
+            row[5].text = row_data["qty"]
+            row[6].text = "—"
+        else:
+            row[0].text = row_data["num"]
+            row[1].text = row_data.get("defect", "—")
+            row[2].text = row_data.get("work", "—")
+            row[3].text = row_data.get("unit", "компл.")
+            row[4].text = row_data.get("qty", "1")
+            row[5].text = "—"
+    
+    # Перемещаем таблицу на место плейсхолдера
+    if table_paragraph_index is not None:
+        target_paragraph = doc.paragraphs[table_paragraph_index]
+        tbl = table._tbl
+        target_paragraph._element.addprevious(tbl)
+    
+    # Подготавливаем плейсхолдеры
+    placeholders = {
+        "ship_code": ship_code,
+        "number": str(number).zfill(2),
+        "date": date_str,
+        "ship": ship or "Не указано",
+        "equipment": equipment or "Не указано",
+        "work_object": "Текущий ремонт",
+        "conclusion": "Детали подлежат замене/восстановлению согласно указанному объёму работ."
+    }
+    
+    # Добавляем поля для насоса
+    if show_purpose:
+        placeholders["purpose"] = "По назначению"
+    if show_basis:
+        placeholders["basis"] = "По заявке"
+    if show_notes:
+        placeholders["notes"] = notes_text
+    
+    doc = replace_placeholders(doc, placeholders)
+    
+    # Если это двигатель — добавляем блок "Особые отметки"
+    if equipment_type != "pump":
+        # Находим место для подписей и вставляем перед ними
+        for paragraph in doc.paragraphs:
+            if "Представитель Подрядчика" in paragraph.text:
+                # Вставляем блок "Особые отметки" перед подписями
+                p = doc.add_paragraph()
+                run = p.add_run('Особые отметки:')
+                run.bold = True
+                doc.add_paragraph(notes_text)
+                doc.add_paragraph()
+                break
+    
+    # Заменяем подписи в зависимости от типа
+    # Удаляем старые подписи и вставляем новые
+    # (это проще сделать через replace_placeholders)
+    if equipment_type != "pump":
+        # Для двигателей — меняем подписи
+        for paragraph in doc.paragraphs:
+            if "Представитель подрядчика (Исполнитель)" in paragraph.text:
+                paragraph.text = "Представитель Подрядчика:"
+            if "Старший механик т/х" in paragraph.text:
+                paragraph.text = "Представитель Заказчика:"
+    
+    file_stream = BytesIO()
+    doc.save(file_stream)
+    file_stream.seek(0)
+    return file_stream
+
+def create_avr_document(ship, works, executor="ООО «Новое время»", customer="АО «Бункерная компания»", location="Рейд 4ый район, г. Находка"):
+    doc = load_template("avr_template.docx")
+    
+    number = get_counter("avr")
+    update_counter("avr", number)
+    
+    date_str = datetime.now().strftime('%d.%m.%Y')
+    ship_code = ship[:3].upper() if ship else "XXX"
+    
+    # Находим параграф с {{table}}
+    table_paragraph_index = None
+    for i, paragraph in enumerate(doc.paragraphs):
+        if "{{table}}" in paragraph.text:
+            table_paragraph_index = i
+            paragraph.text = ""
+            break
+    
+    # Создаём таблицу АВР
+    table = doc.add_table(rows=1, cols=6)
+    table.autofit = False
+    table.allow_autofit = False
+    
+    widths = [Cm(1.8), Cm(5.0), Cm(6.0), Cm(2.2), Cm(2.0), Cm(3.0)]
+    for i, width in enumerate(widths):
+        table.columns[i].width = width
+    
+    headers = ['№ п/п', 'Наименование работ', 'Описание выполненных работ', 'Кол-во', 'Ед. изм.', 'Примечание']
+    header_cells = table.rows[0].cells
+    for i, header in enumerate(headers):
+        header_cells[i].text = header
+        header_cells[i].paragraphs[0].runs[0].bold = True
+        header_cells[i].paragraphs[0].alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    
+    if works:
+        for i, work in enumerate(works, 1):
+            row = table.add_row().cells
+            row[0].text = str(i)
+            row[1].text = work.get('name', '')
+            row[2].text = work.get('description', '')
+            row[3].text = str(work.get('quantity', ''))
+            row[4].text = work.get('unit', '')
+            row[5].text = work.get('note', '')
+    else:
+        row = table.add_row().cells
+        row[0].text = "1"
+        row[1].text = "Основные работы"
+        row[2].text = "Выполнены работы согласно дефектации"
+        row[3].text = "1"
+        row[4].text = "компл."
+        row[5].text = ""
+    
+    # Перемещаем таблицу на место плейсхолдера
+    if table_paragraph_index is not None:
+        target_paragraph = doc.paragraphs[table_paragraph_index]
+        tbl = table._tbl
+        target_paragraph._element.addprevious(tbl)
+    
+    placeholders = {
+        "ship_code": ship_code,
+        "number": str(number).zfill(2),
+        "date": date_str,
+        "ship": ship or "Не указано",
+        "executor": executor,
+        "customer": customer,
+        "location": location,
+    }
+    
+    doc = replace_placeholders(doc, placeholders)
+    
+    file_stream = BytesIO()
+    doc.save(file_stream)
+    file_stream.seek(0)
+    return file_stream
+
+# ============================================================
 #  РАСШИРЕННЫЙ АНАЛИЗ ЗАПРОСОВ
 # ============================================================
 
@@ -293,7 +618,7 @@ def extract_equipment(text):
     text_lower = text.lower()
     equipment_keywords = ["насос", "двигатель", "компрессор", "вентилятор", 
                          "генератор", "кран", "лебедка", "редуктор", "гидромотор",
-                         "брашпиль", "котёл", "водонагреватель"]
+                         "брашпиль", "котёл", "водонагреватель", "дизель", "мотор"]
     for kw in equipment_keywords:
         if kw in text_lower:
             pattern = r'(\w+\s+){0,2}' + kw + r'(\s+\w+){0,2}'
@@ -384,7 +709,8 @@ def extract_defects(text):
         "износ", "течь", "коррози", "трещин", "разруш", "выкрашиван", 
         "задир", "деформац", "ржав", "люфт", "биение", "стук", "вибрац",
         "зазор", "перегрев", "заедание", "отказ", "неисправн", "поломк",
-        "изгиб", "скручиван", "ослаблен", "изношен", "выработк"
+        "изгиб", "скручиван", "ослаблен", "изношен", "выработк",
+        "закоксовыван", "загрязнен", "неплотн", "подтекани"
     ]
     
     found_defects = []
@@ -564,181 +890,6 @@ def generate_from_database(defects, pump_type):
     return "\n".join(lines)
 
 # ============================================================
-#  СОЗДАНИЕ ДОКУМЕНТОВ С ТАБЛИЦЕЙ В WORD
-# ============================================================
-
-def create_defect_document(ship, equipment, defects, work_volume, pump_type=None):
-    doc = load_template("defect_act_template.docx")
-    
-    number = get_counter("da")
-    update_counter("da", number)
-    
-    date_str = datetime.now().strftime('%d.%m.%Y')
-    ship_code = ship[:3].upper() if ship else "XXX"
-    
-    # 1. Находим параграф с {{table}} и запоминаем его индекс
-    table_paragraph_index = None
-    for i, paragraph in enumerate(doc.paragraphs):
-        if "{{table}}" in paragraph.text:
-            table_paragraph_index = i
-            # Очищаем параграф, чтобы потом вставить таблицу
-            paragraph.text = ""
-            break
-    
-    # 2. Собираем данные для таблицы
-    rows_data = build_defect_table(pump_type, defects, work_volume)
-    
-    # 3. Создаём таблицу через python-docx
-    # Сначала создаём таблицу (она пока в конце)
-    table = doc.add_table(rows=1, cols=7)
-    table.autofit = False
-    table.allow_autofit = False
-    
-    widths = [Cm(1.3), Cm(3.8), Cm(5.0), Cm(5.0), Cm(2.0), Cm(1.8), Cm(3.8)]
-    for i, width in enumerate(widths):
-        table.columns[i].width = width
-    
-    # Заголовки
-    headers = ['№', 'Позиция', 'Дефект / Состояние', 'Объём работ', 'Ед. изм.', 'Кол-во', 'Примечание']
-    header_cells = table.rows[0].cells
-    for i, header in enumerate(headers):
-        header_cells[i].text = header
-        header_cells[i].paragraphs[0].runs[0].bold = True
-    
-    # Секции
-    sections = {
-        "1": "Корпус и проточная часть",
-        "2": "Ротор / рабочая часть",
-        "3": "Уплотнения вала",
-        "4": "Подшипниковый узел",
-        "5": "Электропривод",
-        "6": "Арматура и обвязка"
-    }
-    
-    current_section = None
-    for row_data in rows_data:
-        section_key = row_data["num"].split(".")[0]
-        if section_key != current_section:
-            current_section = section_key
-            row = table.add_row().cells
-            for cell in row:
-                cell.text = ""
-            row[0].text = sections.get(section_key, "")
-            for cell in row:
-                cell.paragraphs[0].runs[0].bold = True
-                cell.paragraphs[0].alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        
-        row = table.add_row().cells
-        row[0].text = row_data["num"]
-        row[1].text = row_data["part"]
-        row[2].text = row_data.get("defect", "—")
-        row[3].text = row_data.get("work", "—")
-        row[4].text = row_data["unit"]
-        row[5].text = row_data["qty"]
-        row[6].text = "—"
-    
-    # 4. Перемещаем таблицу на место удалённого плейсхолдера
-    if table_paragraph_index is not None:
-        target_paragraph = doc.paragraphs[table_paragraph_index]
-        tbl = table._tbl
-        target_paragraph._element.addprevious(tbl)
-    
-    # 5. Подставляем остальные плейсхолдеры
-    placeholders = {
-        "ship_code": ship_code,
-        "number": str(number).zfill(2),
-        "date": date_str,
-        "ship": ship or "Не указано",
-        "equipment": equipment or "Не указано",
-        "purpose": "По назначению",
-        "work_object": "Текущий ремонт",
-        "basis": "По заявке",
-        "conclusion": "Детали подлежат замене/восстановлению согласно указанному объёму работ."
-    }
-    
-    doc = replace_placeholders(doc, placeholders)
-    
-    file_stream = BytesIO()
-    doc.save(file_stream)
-    file_stream.seek(0)
-    return file_stream
-
-
-def create_avr_document(ship, works, executor="ООО «Новое время»", customer="АО «Бункерная компания»", location="Рейд 4ый район, г. Находка"):
-    doc = load_template("avr_template.docx")
-    
-    number = get_counter("avr")
-    update_counter("avr", number)
-    
-    date_str = datetime.now().strftime('%d.%m.%Y')
-    ship_code = ship[:3].upper() if ship else "XXX"
-    
-    # 1. Находим параграф с {{table}} и запоминаем его индекс
-    table_paragraph_index = None
-    for i, paragraph in enumerate(doc.paragraphs):
-        if "{{table}}" in paragraph.text:
-            table_paragraph_index = i
-            paragraph.text = ""
-            break
-    
-    # 2. Создаём таблицу АВР
-    table = doc.add_table(rows=1, cols=6)
-    table.autofit = False
-    table.allow_autofit = False
-    
-    widths = [Cm(2.0), Cm(5.0), Cm(6.5), Cm(2.5), Cm(2.5), Cm(3.8)]
-    for i, width in enumerate(widths):
-        table.columns[i].width = width
-    
-    headers = ['№ п/п', 'Наименование работ', 'Описание выполненных работ', 'Кол-во', 'Ед. изм.', 'Примечание']
-    header_cells = table.rows[0].cells
-    for i, header in enumerate(headers):
-        header_cells[i].text = header
-        header_cells[i].paragraphs[0].runs[0].bold = True
-    
-    if works:
-        for i, work in enumerate(works, 1):
-            row = table.add_row().cells
-            row[0].text = str(i)
-            row[1].text = work.get('name', '')
-            row[2].text = work.get('description', '')
-            row[3].text = str(work.get('quantity', ''))
-            row[4].text = work.get('unit', '')
-            row[5].text = work.get('note', '')
-    else:
-        row = table.add_row().cells
-        row[0].text = "1"
-        row[1].text = "Основные работы"
-        row[2].text = "Выполнены работы согласно дефектации"
-        row[3].text = "1"
-        row[4].text = "компл."
-        row[5].text = ""
-    
-    # 3. Перемещаем таблицу на место удалённого плейсхолдера
-    if table_paragraph_index is not None:
-        target_paragraph = doc.paragraphs[table_paragraph_index]
-        tbl = table._tbl
-        target_paragraph._element.addprevious(tbl)
-    
-    # 4. Подставляем плейсхолдеры
-    placeholders = {
-        "ship_code": ship_code,
-        "number": str(number).zfill(2),
-        "date": date_str,
-        "ship": ship or "Не указано",
-        "executor": executor,
-        "customer": customer,
-        "location": location,
-    }
-    
-    doc = replace_placeholders(doc, placeholders)
-    
-    file_stream = BytesIO()
-    doc.save(file_stream)
-    file_stream.seek(0)
-    return file_stream
-
-# ============================================================
 #  КОМАНДА /START
 # ============================================================
 
@@ -755,12 +906,19 @@ def send_welcome(message):
         "📌 Типы насосов в базе:\n"
         "• Центробежные\n"
         "• Шестерёнчатые (ROTAN)\n"
-        "• Поршневые и плунжерные (ОТУ-80)"
+        "• Поршневые и плунжерные (ОТУ-80)\n"
+        "• Двигатели (MAN, Caterpillar и др.)\n\n"
+        "📝 Примеры:\n"
+        "• 'Судно Славянская, пожарный насос, тип центробежный. Повреждена крылатка, трещина вала. Сделай акт'\n"
+        "• 'Судно Аргака, главный двигатель MAN. Износ поршневых колец, износ втулок. Сделай акт'"
     )
 
 # ============================================================
 #  ГЛАВНЫЙ ОБРАБОТЧИК
 # ============================================================
+
+# Словарь для хранения состояния уточнения (в памяти)
+clarification_states = {}
 
 @bot.message_handler(func=lambda message: True)
 def handle_intelligent_input(message):
@@ -768,6 +926,20 @@ def handle_intelligent_input(message):
     text_lower = user_text.lower()
     
     if user_text.startswith('/'):
+        return
+    
+    # Проверяем, не находится ли пользователь в режиме уточнения
+    if message.chat.id in clarification_states and clarification_states[message.chat.id]:
+        equipment_type = text_lower
+        if "1" in equipment_type or "насос" in equipment_type:
+            clarification_states[message.chat.id] = "pump"
+            bot.reply_to(message, "✅ Принято: насос")
+        elif "2" in equipment_type or "двигател" in equipment_type:
+            clarification_states[message.chat.id] = "engine"
+            bot.reply_to(message, "✅ Принято: двигатель")
+        else:
+            clarification_states[message.chat.id] = "other"
+            bot.reply_to(message, "✅ Принято: другое оборудование")
         return
     
     # ---- 1. ЧЕК-ЛИСТ ----
@@ -837,7 +1009,16 @@ def handle_intelligent_input(message):
     
     # ---- 4. ДЕФЕКТЫ ----
     if any(word in text_lower for word in ['какие дефекты', 'частые дефекты', 'список дефектов', 'дефекты бывают']):
-        pump_type = detect_pump_type(text_lower)
+        # Проверяем, о чём спрашивают: о насосе или о двигателе
+        if any(word in text_lower for word in ["двигател", "дизель", "мотор"]):
+            defects = pump_db.get_common_defects("engine")
+            response = f"📋 **Частые дефекты двигателей:**\n\n"
+            for i, defect in enumerate(defects, 1):
+                response += f"{i}. {defect}\n"
+            bot.reply_to(message, response, parse_mode='Markdown')
+            return
+        
+        pump_type = detect_pump_type(user_text)
         if pump_type:
             pump_name = pump_db.get_pump_name(pump_type)
             defects = pump_db.get_common_defects(pump_type)
@@ -849,7 +1030,7 @@ def handle_intelligent_input(message):
             bot.reply_to(message, response, parse_mode='Markdown')
             return
         else:
-            bot.reply_to(message, "📌 Уточните тип насоса: центробежный, шестерёнчатый или поршневой")
+            bot.reply_to(message, "📌 Уточните тип оборудования: насос (центробежный, шестерёнчатый, поршневой) или двигатель")
             return
     
     # ---- 5. НОРМАТИВЫ ----
@@ -881,13 +1062,21 @@ def handle_intelligent_input(message):
             pump_type = analysis.get('pump_type')
             clearances = analysis.get('clearances', [])
             
+            # Проверяем, определён ли тип оборудования
+            equip_type = detect_equipment_type(equipment or "")
+            if equip_type is None and equipment:
+                # Не удалось определить тип — просим уточнить
+                clarification_states[message.chat.id] = True
+                bot.reply_to(message, ask_for_clarification(equipment))
+                return
+            
             for c in clearances:
                 defect_text = f"зазор {c['type']}: {c['value']} мм"
                 if defect_text not in defects:
                     defects.append(defect_text)
             
             if not defects:
-                for kw in ["износ", "течь", "коррози", "трещин", "выкрашиван", "задир", "деформац", "люфт", "зазор"]:
+                for kw in ["износ", "течь", "коррози", "трещин", "выкрашиван", "задир", "деформац", "люфт", "зазор", "загрязнен", "неплотн"]:
                     if kw in text_lower:
                         defects.append(kw)
                 if not defects:
@@ -935,6 +1124,6 @@ def handle_intelligent_input(message):
 
 if __name__ == '__main__':
     print("🤖 Бот-ассистент запущен!")
-    print("📌 Типы насосов в базе: центробежные, шестерёнчатые, поршневые/плунжерные")
+    print("📌 Типы оборудования в базе: насосы (центробежные, шестерёнчатые, поршневые), двигатели")
     print("📌 Доступные функции: ДА, АВР, проверка зазоров, дефекты, нормативы, чек-лист")
     bot.infinity_polling()
