@@ -191,41 +191,20 @@ def ask_for_clarification(equipment):
 def analyze_with_ai(text):
     """Отправляет запрос в Groq для интеллектуального анализа"""
     if not GROQ_API_KEY:
+        print("❌ GROQ_API_KEY не найден")
         return None
     
     try:
         client = httpx.Client(timeout=30.0)
         
-        prompt = f"""
-Ты — инженерный ассистент для судоремонта. Разбери запрос пользователя и верни ответ строго в формате JSON.
+        prompt = f"""Ты — инженерный ассистент. Разбери запрос и верни JSON.
 
-Запрос пользователя: {text}
+Запрос: {text}
 
-Ответ должен содержать следующие поля:
-- "ship": название судна (если есть, иначе null)
-- "equipment": название оборудования (насос, двигатель, компрессор и т.д.)
-- "equipment_type": тип оборудования (pump, engine, compressor, other)
-- "pump_type": если это насос — тип (centrifugal, gear, piston, null)
-- "defects": список дефектов (массив строк)
-- "clearances": список зазоров (массив объектов с полями "type" и "value")
+Ответь строго в формате:
+{{"ship": "название судна или null", "equipment": "название оборудования", "equipment_type": "pump/engine/compressor/other", "pump_type": "centrifugal/gear/piston/null", "defects": ["дефект1", "дефект2"], "clearances": []}}
 
-Пример ответа:
-{{
-  "ship": "Славянская",
-  "equipment": "двигатель MAN 6S42MC",
-  "equipment_type": "engine",
-  "pump_type": null,
-  "defects": ["течь по втулке", "протечка форсунки", "подтеки масла"],
-  "clearances": []
-}}
-
-Важно:
-- "pump_type" может быть только: centrifugal, gear, piston, null
-- "equipment_type" может быть только: pump, engine, compressor, other
-- Если какое-то поле не определено — укажи null или пустой массив.
-
-Ответь ТОЛЬКО JSON, без лишнего текста, без маркеров кода.
-"""
+Никакого лишнего текста, только JSON."""
 
         response = client.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -233,30 +212,28 @@ def analyze_with_ai(text):
             json={
                 "model": "mixtral-8x7b-32768",
                 "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1
+                "temperature": 0.1,
+                "max_tokens": 300
             },
             timeout=30.0
         )
         
         if response.status_code == 200:
             content = response.json()['choices'][0]['message']['content']
-            # Парсим JSON из ответа
             try:
-                # Ищем JSON в ответе
                 json_start = content.find('{')
                 json_end = content.rfind('}') + 1
                 if json_start != -1 and json_end != -1:
-                    json_str = content[json_start:json_end]
-                    return json.loads(json_str)
+                    return json.loads(content[json_start:json_end])
             except:
                 pass
-            return None
         else:
-            print(f"Groq API error: {response.status_code}")
-            return None
+            print(f"❌ Groq API error (analyze): {response.status_code}")
+        
+        return None
             
     except Exception as e:
-        print(f"Ошибка AI анализа: {e}")
+        print(f"❌ Ошибка AI анализа: {e}")
         return None
 
 # ============================================================
@@ -450,7 +427,7 @@ def parse_works_for_avr(text):
             line = line.replace(note_match.group(0), '').strip()
         
         if ':' in line or '—' in line or '-' in line:
-            parts = re.split(r':\s*|—\s*|-\s*', line, 1)
+            parts = re.split(r':\s*|—\s*|-\s*', line, maxsplit=1)
             if len(parts) == 2:
                 work["name"] = parts[0].strip().capitalize()
                 work["description"] = parts[1].strip().capitalize()
@@ -486,7 +463,6 @@ def analyze_query(text):
     ai_result = analyze_with_ai(text)
     
     if ai_result:
-        # Преобразуем AI результат в нужный формат
         return {
             "ship": ai_result.get("ship"),
             "equipment": ai_result.get("equipment"),
@@ -528,15 +504,14 @@ def analyze_query(text):
 def generate_work_volume(defects, full_text, pump_type=None, equipment_type=None):
     """Генерирует объём работ с использованием AI"""
     
-    # Пытаемся использовать Groq
     if GROQ_API_KEY:
         try:
-            return generate_with_ai(defects, full_text, pump_type, equipment_type)
+            ai_result = generate_with_ai(defects, full_text, pump_type, equipment_type)
+            if ai_result:
+                return ai_result
         except Exception as e:
-            print(f"Ошибка AI генерации: {e}")
-            return generate_base_work_volume(defects)
+            print(f"❌ Ошибка AI генерации: {e}")
     
-    # Если нет ключа — базовый шаблон
     return generate_base_work_volume(defects)
 
 def generate_with_ai(defects, full_text, pump_type, equipment_type):
@@ -544,7 +519,6 @@ def generate_with_ai(defects, full_text, pump_type, equipment_type):
     client = httpx.Client(timeout=30.0)
     defect_text = "\n".join(defects) if defects else full_text
     
-    # Определяем тип оборудования для контекста
     equip_name = "оборудования"
     if equipment_type == "pump":
         equip_name = "насоса"
@@ -554,51 +528,46 @@ def generate_with_ai(defects, full_text, pump_type, equipment_type):
     elif equipment_type == "engine":
         equip_name = "двигателя"
     
-    prompt = f"""
-Ты — опытный инженер-судоремонтник. На основе описания дефектов составь подробный, конкретный объём работ для ремонта {equip_name}.
-
-Описание дефектов:
+    prompt = f"""Составь объём работ для ремонта {equip_name} по дефектам:
 {defect_text}
 
-Требования к ответу:
-1. Ответ должен быть в виде нумерованного списка (1., 2., 3. и т.д.)
-2. Каждый пункт должен начинаться с глагола (Демонтаж, Разборка, Замена, Восстановление, Сборка, Монтаж, Проверка, Регулировка, Испытание)
-3. Указывай конкретные детали и узлы (не просто "замена деталей", а "замена поршневых колец" или "проточка седла клапана")
-4. Учитывай специфику дефектов: если есть "течь" — добавь "замена уплотнений", если "износ" — "восстановление или замена"
-5. Обязательно включи:
-   - Демонтаж узла
-   - Разборку и дефектацию всех повреждённых деталей
-   - Конкретные работы по замене/восстановлению
-   - Сборку с проверкой зазоров
-   - Монтаж
-   - Предъявление лицу сдающему
-6. Не используй общие фразы, пиши конкретно для этого случая.
+Ответь нумерованным списком (1., 2., 3.):
+1. Демонтаж
+2. Разборка и дефектация
+3. Замена/восстановление конкретных деталей
+4. Сборка
+5. Монтаж
+6. Предъявление лицу сдающему
 
-Ответь коротко и по делу, без лишних объяснений.
-"""
+Без лишнего текста."""
 
-    response = client.post(
-        "https://api.groq.com/openai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-        json={
-            "model": "mixtral-8x7b-32768",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3
-        },
-        timeout=30.0
-    )
-    
-    if response.status_code == 200:
-        return response.json()['choices'][0]['message']['content']
-    else:
-        print(f"Groq API error (work volume): {response.status_code}")
-        return generate_base_work_volume(defects)
+    try:
+        response = client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            json={
+                "model": "mixtral-8x7b-32768",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": 400
+            },
+            timeout=30.0
+        )
+        
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content']
+        else:
+            print(f"❌ Groq API error (work volume): {response.status_code}")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Ошибка генерации: {e}")
+        return None
 
 def generate_base_work_volume(defects):
     """Базовый объём работ (запасной вариант)"""
     lines = ["1. Демонтаж узла", "2. Разборка и дефектация"]
     
-    # Пытаемся добавить конкретные работы по дефектам
     work_items = []
     for defect in defects:
         defect_lower = defect.lower()
@@ -616,7 +585,6 @@ def generate_base_work_volume(defects):
             work_items.append("замена уплотнений и проверка герметичности")
     
     if work_items:
-        # Убираем дубли
         unique_items = list(dict.fromkeys(work_items))
         lines.append("3. " + "; ".join(unique_items))
     else:
@@ -690,7 +658,6 @@ def build_defect_table_pump(pump_type, defects, work_volume):
         {"num": "6.3", "part": "Крепёж и расходные материалы", "defect": "", "unit": "компл.", "qty": "1"},
     ])
     
-    # Распределяем дефекты по позициям
     for defect in defects:
         defect_lower = defect.lower()
         placed = False
@@ -719,10 +686,9 @@ def build_defect_table_pump(pump_type, defects, work_volume):
 # ============================================================
 
 def build_defect_table_engine(defects, work_volume):
-    """Строит таблицу для двигателей (6 колонок, как в образце)"""
+    """Строит таблицу для двигателей (6 колонок)"""
     rows = []
     
-    # Секции
     sections = {
         "Цилиндропоршневая группа": [],
         "Головка цилиндров и газораспределение": [],
@@ -730,7 +696,6 @@ def build_defect_table_engine(defects, work_volume):
         "Сборочные и испытательные работы": []
     }
     
-    # Определяем, к какой секции относится дефект
     for i, defect in enumerate(defects, 1):
         defect_lower = defect.lower()
         section = None
@@ -771,14 +736,10 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     date_str = datetime.now().strftime('%d.%m.%Y')
     ship_code = ship[:3].upper() if ship else "XXX"
     
-    # Определяем тип оборудования
     equipment_type = detect_equipment_type(equipment or "")
-    
-    # Если тип не определён — используем насос по умолчанию
     if equipment_type is None:
         equipment_type = "pump"
     
-    # Строим таблицу в зависимости от типа
     if equipment_type == "pump":
         rows_data = build_defect_table_pump(pump_type, defects, work_volume)
         cols = 7
@@ -792,26 +753,22 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
             "6": "Арматура и обвязка"
         }
         get_section_key = lambda row: row["num"].split(".")[0]
-        # Поля для насоса
         show_purpose = True
         show_basis = True
         show_conclusion = True
         show_notes = False
     else:
-        # Двигатели, компрессоры и другое — 6 колонок
         rows_data = build_defect_table_engine(defects, work_volume)
         cols = 6
         headers = ['№ п/п', 'Наименование дефекта', 'Объём работ', 'Ед. изм.', 'Кол-во', 'Примечание']
         sections = {}
         get_section_key = lambda row: row.get("section", "Прочее")
-        # Поля для двигателя
         show_purpose = False
         show_basis = False
         show_conclusion = False
         show_notes = True
         notes_text = "Все СЗЧ (поршневые кольца, поршни, втулка, комплекты для форсунок, РТИ) — поставка Заказчика, если не указано иное.\nРаботы по проточке и транспортировке деталей выполняются Подрядчиком за отдельную плату (акт дополнительных работ)."
     
-    # Находим параграф с {{table}}
     table_paragraph_index = None
     for i, paragraph in enumerate(doc.paragraphs):
         if "{{table}}" in paragraph.text:
@@ -819,7 +776,6 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
             paragraph.text = ""
             break
     
-    # Создаём таблицу
     table = doc.add_table(rows=1, cols=cols)
     table.autofit = False
     table.allow_autofit = False
@@ -832,14 +788,12 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     for i, width in enumerate(widths):
         table.columns[i].width = width
     
-    # Заголовки
     header_cells = table.rows[0].cells
     for i, header in enumerate(headers):
         header_cells[i].text = header
         header_cells[i].paragraphs[0].runs[0].bold = True
         header_cells[i].paragraphs[0].alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
     
-    # Заполняем строки
     current_section = None
     for row_data in rows_data:
         section_key = get_section_key(row_data)
@@ -873,13 +827,11 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
             row[4].text = row_data.get("qty", "1")
             row[5].text = "—"
     
-    # Перемещаем таблицу на место плейсхолдера
     if table_paragraph_index is not None:
         target_paragraph = doc.paragraphs[table_paragraph_index]
         tbl = table._tbl
         target_paragraph._element.addprevious(tbl)
     
-    # Подготавливаем плейсхолдеры
     placeholders = {
         "ship_code": ship_code,
         "number": str(number).zfill(2),
@@ -889,7 +841,6 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
         "work_object": "Текущий ремонт"
     }
     
-    # Добавляем поля для насоса
     if show_purpose:
         placeholders["purpose"] = "По назначению"
     if show_basis:
@@ -901,12 +852,9 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     
     doc = replace_placeholders(doc, placeholders)
     
-    # Если это двигатель — добавляем блок "Особые отметки" перед подписями
     if equipment_type != "pump":
-        # Ищем место для вставки "Особые отметки" перед подписями
         for i, paragraph in enumerate(doc.paragraphs):
             if "Представитель Подрядчика" in paragraph.text or "Представитель заказчика" in paragraph.text:
-                # Вставляем блок "Особые отметки" перед этим параграфом
                 p = doc.paragraphs[i].insert_paragraph_before()
                 run = p.add_run('Особые отметки:')
                 run.bold = True
@@ -916,7 +864,6 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
                 p.text = ""
                 break
     
-    # Корректируем подписи в зависимости от типа
     if equipment_type != "pump":
         for paragraph in doc.paragraphs:
             if "Представитель подрядчика (Исполнитель)" in paragraph.text:
@@ -944,7 +891,6 @@ def create_avr_document(ship, works, executor="ООО «Новое время»"
     date_str = datetime.now().strftime('%d.%m.%Y')
     ship_code = ship[:3].upper() if ship else "XXX"
     
-    # Находим параграф с {{table}}
     table_paragraph_index = None
     for i, paragraph in enumerate(doc.paragraphs):
         if "{{table}}" in paragraph.text:
@@ -952,7 +898,6 @@ def create_avr_document(ship, works, executor="ООО «Новое время»"
             paragraph.text = ""
             break
     
-    # Создаём таблицу АВР
     table = doc.add_table(rows=1, cols=6)
     table.autofit = False
     table.allow_autofit = False
@@ -986,7 +931,6 @@ def create_avr_document(ship, works, executor="ООО «Новое время»"
         row[4].text = "компл."
         row[5].text = ""
     
-    # Перемещаем таблицу на место плейсхолдера
     if table_paragraph_index is not None:
         target_paragraph = doc.paragraphs[table_paragraph_index]
         tbl = table._tbl
@@ -1036,7 +980,6 @@ def send_welcome(message):
 #  ГЛАВНЫЙ ОБРАБОТЧИК
 # ============================================================
 
-# Словарь для хранения состояния уточнения (в памяти)
 clarification_states = {}
 
 @bot.message_handler(func=lambda message: True)
@@ -1047,7 +990,6 @@ def handle_intelligent_input(message):
     if user_text.startswith('/'):
         return
     
-    # Проверяем, не находится ли пользователь в режиме уточнения
     if message.chat.id in clarification_states and clarification_states[message.chat.id]:
         equipment_type = text_lower
         if "1" in equipment_type or "насос" in equipment_type:
@@ -1075,7 +1017,6 @@ def handle_intelligent_input(message):
             
             analysis = analyze_query(user_text)
             
-            # Если анализ сделан AI, покажем это
             if analysis.get("source") == "ai":
                 bot.send_message(message.chat.id, "✅ Запрос проанализирован нейросетью")
             else:
@@ -1088,12 +1029,10 @@ def handle_intelligent_input(message):
             equipment_type = analysis.get('equipment_type')
             clearances = analysis.get('clearances', [])
             
-            # Если оборудование не определено — пробуем уточнить
             if not equipment:
                 bot.reply_to(message, "🤔 Не удалось определить оборудование. Уточните: это насос, двигатель или другое оборудование?")
                 return
             
-            # Если оборудование определено, но тип неясен — уточняем
             if not equipment_type or equipment_type == "other":
                 equip_type = detect_equipment_type(equipment)
                 if equip_type is None:
@@ -1209,7 +1148,6 @@ def handle_intelligent_input(message):
     
     # ---- 5. ДЕФЕКТЫ ----
     if any(word in text_lower for word in ['какие дефекты', 'частые дефекты', 'список дефектов', 'дефекты бывают']):
-        # Проверяем, о чём спрашивают: о насосе или о двигателе
         if any(word in text_lower for word in ["двигател", "дизель", "мотор"]):
             defects = pump_db.get_common_defects("engine")
             response = f"📋 **Частые дефекты двигателей:**\n\n"
