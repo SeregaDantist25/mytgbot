@@ -1030,117 +1030,10 @@ def handle_intelligent_input(message):
             bot.reply_to(message, "✅ Принято: другое оборудование")
             return
     
-    # ---- 1. ЧЕК-ЛИСТ ----
-    if any(word in text_lower for word in ['чек-лист', 'перечень деталей', 'какие детали']):
-        pump_type = detect_pump_type(user_text)
-        if pump_type:
-            items = pump_db.get_checklist(pump_type)
-            pump_name = pump_db.get_pump_name(pump_type)
-            response = f"📋 **Чек-лист для {pump_name} насоса:**\n\n"
-            for i, item in enumerate(items, 1):
-                response += f"{i}. {item}\n"
-            bot.reply_to(message, response, parse_mode='Markdown')
-        else:
-            bot.reply_to(message, "📌 Уточните тип насоса: центробежный, шестерёнчатый или поршневой")
-        return
-    
-    # ---- 2. АВР ----
-    if any(word in text_lower for word in ['авр', 'акт выполненных', 'выполненные работы']):
-        ship = detect_ship(user_text)
-        works = parse_works_for_avr(user_text)
-        
-        if not works:
-            bot.reply_to(message,
-                "🤔 Для создания АВР опишите выполненные работы:\n"
-                "Пример: 'АВР: Кабель-трасса: замена уголков 44 шт, болтов 194 шт.'"
-            )
-            return
-        
-        file_stream = create_avr_document(ship, works)
-        bot.send_document(
-            message.chat.id,
-            file_stream,
-            visible_file_name=f'АВР_{ship or "судна"}.docx'
-        )
-        bot.send_message(message.chat.id, "📄 Акт выполненных работ отправлен!")
-        return
-    
-    # ---- 3. ПРОВЕРКА ЗАЗОРОВ ----
-    if any(word in text_lower for word in ['проверь зазор', 'проверка зазора', 'какой зазор', 'норма зазора']):
-        clearances = extract_clearances_from_text(user_text)
-        if clearances:
-            responses = []
-            for c in clearances:
-                if c['type'] != 'unknown':
-                    pump_type = detect_pump_type(user_text)
-                    if not pump_type:
-                        if "шестерен" in text_lower or "ротан" in text_lower:
-                            pump_type = "gear"
-                        elif "поршн" in text_lower or "плунж" in text_lower or "паровой" in text_lower:
-                            pump_type = "piston"
-                        else:
-                            pump_type = "centrifugal"
-                    result = pump_db.check_clearance(pump_type, c['type'], c['value'])
-                    responses.append(f"🔹 {c['type']}: {c['value']} мм -> {result['message']}")
-            if responses:
-                response = "📊 **Результаты проверки зазоров:**\n\n" + "\n".join(responses)
-                bot.reply_to(message, response, parse_mode='Markdown')
-                return
-        
-        bot.reply_to(message,
-            "🔧 Чтобы проверить зазор, напишите:\n"
-            "`проверь зазор центробежный радиальный 0.25`\n"
-            "`проверь зазор поршневой cylinder_piston 0.15`\n\n"
-            "Доступные зазоры для поршневых: cylinder_piston, ring_groove, ring_gap, crosshead, main_bearing, connecting_rod, seal_wear"
-        )
-        return
-    
-    # ---- 4. ДЕФЕКТЫ ----
-    if any(word in text_lower for word in ['какие дефекты', 'частые дефекты', 'список дефектов', 'дефекты бывают']):
-        # Проверяем, о чём спрашивают: о насосе или о двигателе
-        if any(word in text_lower for word in ["двигател", "дизель", "мотор"]):
-            defects = pump_db.get_common_defects("engine")
-            response = f"📋 **Частые дефекты двигателей:**\n\n"
-            for i, defect in enumerate(defects, 1):
-                response += f"{i}. {defect}\n"
-            bot.reply_to(message, response, parse_mode='Markdown')
-            return
-        
-        pump_type = detect_pump_type(user_text)
-        if pump_type:
-            pump_name = pump_db.get_pump_name(pump_type)
-            defects = pump_db.get_common_defects(pump_type)
-            response = f"📋 **Частые дефекты {pump_name} насоса:**\n\n"
-            for i, defect in enumerate(defects, 1):
-                method = pump_db.get_repair_method(pump_type, defect)
-                method_text = f" -> {method}" if method else ""
-                response += f"{i}. {defect}{method_text}\n"
-            bot.reply_to(message, response, parse_mode='Markdown')
-            return
-        else:
-            bot.reply_to(message, "📌 Уточните тип оборудования: насос (центробежный, шестерёнчатый, поршневой) или двигатель")
-            return
-    
-    # ---- 5. НОРМАТИВЫ ----
-    if any(word in text_lower for word in ['норматив', 'норма', 'ту', 'техническ']):
-        response = "📐 **Нормативы зазоров по ТУ**\n\n"
-        for pump_type in pump_db.get_pump_types():
-            pump_name = pump_db.get_pump_name(pump_type)
-            response += f"**{pump_name.capitalize()} насос:**\n"
-            clearances = pump_db.data.get(pump_type, {}).get("clearances", {})
-            for ct, data in clearances.items():
-                min_val = data.get("min", 0)
-                max_val = data.get("max", 0)
-                unit = data.get("unit", "мм")
-                response += f"  • {ct}: {min_val}-{max_val} {unit}\n"
-            response += "\n"
-        bot.reply_to(message, response, parse_mode='Markdown')
-        return
-    
-    # ---- 6. АКТ ДЕФЕКТАЦИИ ----
+    # ---- 1. АКТ ДЕФЕКТАЦИИ (ГЛАВНЫЙ ПРИОРИТЕТ) ----
     wants_act = any(word in text_lower for word in [
         'акт', 'дефектовк', 'сделай акт', 'оформи', 'составь', 'создай',
-        'двигател', 'мотор', 'дизель', 'гд'
+        'двигател', 'мотор', 'дизель', 'гд', 'насос', 'помп'
     ])
     
     if wants_act:
@@ -1214,6 +1107,113 @@ def handle_intelligent_input(message):
                 error_text = error_text[:4000] + "\n\n... (обрезано)"
             bot.send_message(message.chat.id, error_text)
             print(error_text)
+        return
+    
+    # ---- 2. АВР ----
+    if any(word in text_lower for word in ['авр', 'акт выполненных', 'выполненные работы']):
+        ship = detect_ship(user_text)
+        works = parse_works_for_avr(user_text)
+        
+        if not works:
+            bot.reply_to(message,
+                "🤔 Для создания АВР опишите выполненные работы:\n"
+                "Пример: 'АВР: Кабель-трасса: замена уголков 44 шт, болтов 194 шт.'"
+            )
+            return
+        
+        file_stream = create_avr_document(ship, works)
+        bot.send_document(
+            message.chat.id,
+            file_stream,
+            visible_file_name=f'АВР_{ship or "судна"}.docx'
+        )
+        bot.send_message(message.chat.id, "📄 Акт выполненных работ отправлен!")
+        return
+    
+    # ---- 3. ЧЕК-ЛИСТ ----
+    if any(word in text_lower for word in ['чек-лист', 'перечень деталей', 'какие детали']):
+        pump_type = detect_pump_type(user_text)
+        if pump_type:
+            items = pump_db.get_checklist(pump_type)
+            pump_name = pump_db.get_pump_name(pump_type)
+            response = f"📋 **Чек-лист для {pump_name} насоса:**\n\n"
+            for i, item in enumerate(items, 1):
+                response += f"{i}. {item}\n"
+            bot.reply_to(message, response, parse_mode='Markdown')
+        else:
+            bot.reply_to(message, "📌 Уточните тип насоса: центробежный, шестерёнчатый или поршневой")
+        return
+    
+    # ---- 4. ПРОВЕРКА ЗАЗОРОВ ----
+    if any(word in text_lower for word in ['проверь зазор', 'проверка зазора', 'какой зазор', 'норма зазора']):
+        clearances = extract_clearances_from_text(user_text)
+        if clearances:
+            responses = []
+            for c in clearances:
+                if c['type'] != 'unknown':
+                    pump_type = detect_pump_type(user_text)
+                    if not pump_type:
+                        if "шестерен" in text_lower or "ротан" in text_lower:
+                            pump_type = "gear"
+                        elif "поршн" in text_lower or "плунж" in text_lower or "паровой" in text_lower:
+                            pump_type = "piston"
+                        else:
+                            pump_type = "centrifugal"
+                    result = pump_db.check_clearance(pump_type, c['type'], c['value'])
+                    responses.append(f"🔹 {c['type']}: {c['value']} мм -> {result['message']}")
+            if responses:
+                response = "📊 **Результаты проверки зазоров:**\n\n" + "\n".join(responses)
+                bot.reply_to(message, response, parse_mode='Markdown')
+                return
+        
+        bot.reply_to(message,
+            "🔧 Чтобы проверить зазор, напишите:\n"
+            "`проверь зазор центробежный радиальный 0.25`\n"
+            "`проверь зазор поршневой cylinder_piston 0.15`\n\n"
+            "Доступные зазоры для поршневых: cylinder_piston, ring_groove, ring_gap, crosshead, main_bearing, connecting_rod, seal_wear"
+        )
+        return
+    
+    # ---- 5. ДЕФЕКТЫ ----
+    if any(word in text_lower for word in ['какие дефекты', 'частые дефекты', 'список дефектов', 'дефекты бывают']):
+        # Проверяем, о чём спрашивают: о насосе или о двигателе
+        if any(word in text_lower for word in ["двигател", "дизель", "мотор"]):
+            defects = pump_db.get_common_defects("engine")
+            response = f"📋 **Частые дефекты двигателей:**\n\n"
+            for i, defect in enumerate(defects, 1):
+                response += f"{i}. {defect}\n"
+            bot.reply_to(message, response, parse_mode='Markdown')
+            return
+        
+        pump_type = detect_pump_type(user_text)
+        if pump_type:
+            pump_name = pump_db.get_pump_name(pump_type)
+            defects = pump_db.get_common_defects(pump_type)
+            response = f"📋 **Частые дефекты {pump_name} насоса:**\n\n"
+            for i, defect in enumerate(defects, 1):
+                method = pump_db.get_repair_method(pump_type, defect)
+                method_text = f" -> {method}" if method else ""
+                response += f"{i}. {defect}{method_text}\n"
+            bot.reply_to(message, response, parse_mode='Markdown')
+            return
+        else:
+            bot.reply_to(message, "📌 Уточните тип оборудования: насос (центробежный, шестерёнчатый, поршневой) или двигатель")
+            return
+    
+    # ---- 6. НОРМАТИВЫ ----
+    if any(word in text_lower for word in ['норматив', 'норма', 'ту', 'техническ']):
+        response = "📐 **Нормативы зазоров по ТУ**\n\n"
+        for pump_type in pump_db.get_pump_types():
+            pump_name = pump_db.get_pump_name(pump_type)
+            response += f"**{pump_name.capitalize()} насос:**\n"
+            clearances = pump_db.data.get(pump_type, {}).get("clearances", {})
+            for ct, data in clearances.items():
+                min_val = data.get("min", 0)
+                max_val = data.get("max", 0)
+                unit = data.get("unit", "мм")
+                response += f"  • {ct}: {min_val}-{max_val} {unit}\n"
+            response += "\n"
+        bot.reply_to(message, response, parse_mode='Markdown')
         return
     
     # ---- 7. НЕПОНЯТНО ----
