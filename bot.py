@@ -13,7 +13,6 @@ import json
 
 # --- Настройки ---
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 
 if not BOT_TOKEN:
     raise ValueError("Переменная TELEGRAM_BOT_TOKEN не найдена!")
@@ -185,59 +184,139 @@ def ask_for_clarification(equipment):
     return f"🔍 Я нашёл упоминание '{equipment}'. Уточните, это:\n1️⃣ Насос\n2️⃣ Двигатель\n3️⃣ Другое оборудование\n\nПросто напишите номер или название."
 
 # ============================================================
-#  АНАЛИЗ ЗАПРОСА С ПОМОЩЬЮ AI (GROQ)
+#  AI РОУТЕР (ТОЛЬКО АЛИСА)
 # ============================================================
 
-def analyze_with_ai(text):
-    """Отправляет запрос в Groq для интеллектуального анализа"""
-    if not GROQ_API_KEY:
-        print("❌ GROQ_API_KEY не найден")
-        return None
-    
-    try:
-        client = httpx.Client(timeout=30.0)
+class AliceRouter:
+    def __init__(self):
+        self.api_key = os.environ.get('ALICE_API_KEY')
+        self.folder_id = os.environ.get('YANDEX_FOLDER_ID')
+        self.url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+        self.stats = {"calls": 0, "errors": 0}
         
-        prompt = f"""Ты — инженерный ассистент. Разбери запрос и верни JSON.
+        if not self.api_key:
+            print("❌ ALICE_API_KEY не найден")
+        if not self.folder_id:
+            print("❌ YANDEX_FOLDER_ID не найден")
+    
+    def call(self, prompt, temperature=0.1, max_tokens=500):
+        """Вызывает Алису"""
+        if not self.api_key or not self.folder_id:
+            return None
+        
+        try:
+            client = httpx.Client(timeout=30.0)
+            
+            payload = {
+                "modelUri": f"gpt://{self.folder_id}/yandexgpt/latest",
+                "completionOptions": {
+                    "stream": False,
+                    "temperature": temperature,
+                    "maxTokens": max_tokens
+                },
+                "messages": [
+                    {"role": "user", "text": prompt}
+                ]
+            }
+            
+            response = client.post(
+                self.url,
+                headers={
+                    "Authorization": f"Api-Key {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json=payload
+            )
+            
+            self.stats["calls"] += 1
+            
+            if response.status_code == 200:
+                result = response.json()
+                if 'result' in result and 'alternatives' in result['result']:
+                    return result['result']['alternatives'][0]['message']['text']
+                else:
+                    print(f"❌ Неожиданный формат ответа")
+                    return None
+            else:
+                self.stats["errors"] += 1
+                print(f"❌ Ошибка Алисы: {response.status_code}")
+                print(f"Ответ: {response.text[:200]}")
+                return None
+                
+        except Exception as e:
+            self.stats["errors"] += 1
+            print(f"❌ Ошибка Алисы: {e}")
+            return None
+    
+    def analyze_query(self, text):
+        """Анализ запроса"""
+        prompt = f"""Разбери запрос пользователя и верни ответ строго в формате JSON.
 
 Запрос: {text}
 
-Ответь строго в формате:
-{{"ship": "название судна или null", "equipment": "название оборудования", "equipment_type": "pump/engine/compressor/other", "pump_type": "centrifugal/gear/piston/null", "defects": ["дефект1", "дефект2"], "clearances": []}}
+Ответ должен содержать поля:
+- "ship": название судна или null
+- "equipment": название оборудования
+- "equipment_type": pump/engine/compressor/other
+- "pump_type": centrifugal/gear/piston/null
+- "defects": список дефектов
+- "clearances": []
 
-Никакого лишнего текста, только JSON."""
+Ответь ТОЛЬКО JSON. Никакого лишнего текста."""
 
-        response = client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-            json={
-                "model": "mixtral-8x7b-32768",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1,
-                "max_tokens": 300
-            },
-            timeout=30.0
-        )
-        
-        if response.status_code == 200:
-            content = response.json()['choices'][0]['message']['content']
-            try:
-                json_start = content.find('{')
-                json_end = content.rfind('}') + 1
-                if json_start != -1 and json_end != -1:
-                    return json.loads(content[json_start:json_end])
-            except:
-                pass
-        else:
-            print(f"❌ Groq API error (analyze): {response.status_code}")
-        
+        result = self.call(prompt, temperature=0.1, max_tokens=300)
+        if result:
+            return self._parse_json(result)
         return None
-            
-    except Exception as e:
-        print(f"❌ Ошибка AI анализа: {e}")
+    
+    def generate_work_volume(self, defects, equipment_type, pump_type=None):
+        """Генерация объёма работ"""
+        equip_name = "оборудования"
+        if equipment_type == "pump":
+            equip_name = "насоса"
+            if pump_type:
+                pump_name = pump_db.get_pump_name(pump_type) if pump_type else ""
+                equip_name = f"{pump_name} насоса"
+        elif equipment_type == "engine":
+            equip_name = "двигателя"
+        
+        prompt = f"""Составь подробный объём работ для ремонта {equip_name} по следующим дефектам:
+{chr(10).join(defects) if defects else 'дефекты не указаны'}
+
+Ответь в виде нумерованного списка:
+1. Демонтаж узла
+2. Разборка и дефектация
+3. Конкретные работы по замене/восстановлению деталей
+4. Сборка с проверкой зазоров
+5. Монтаж
+6. Предъявление лицу сдающему
+
+Пиши конкретно, указывай детали."""
+        
+        result = self.call(prompt, temperature=0.3, max_tokens=400)
+        if result:
+            return result
         return None
+    
+    def _parse_json(self, text):
+        """Извлекает JSON из текста"""
+        try:
+            json_start = text.find('{')
+            json_end = text.rfind('}') + 1
+            if json_start != -1 and json_end != -1:
+                return json.loads(text[json_start:json_end])
+        except:
+            pass
+        return None
+    
+    def get_stats(self):
+        return self.stats
+
+# Создаём глобальный экземпляр роутера
+alice_router = AliceRouter()
 
 # ============================================================
-#  РАСШИРЕННЫЙ АНАЛИЗ ЗАПРОСОВ (С AI)
+#  РАСШИРЕННЫЙ АНАЛИЗ ЗАПРОСОВ
 # ============================================================
 
 def detect_ship(text):
@@ -459,8 +538,8 @@ def parse_works_for_avr(text):
 def analyze_query(text):
     """Полный анализ запроса с использованием AI"""
     
-    # 1. Сначала пробуем AI
-    ai_result = analyze_with_ai(text)
+    # 1. Пробуем Алису
+    ai_result = alice_router.analyze_query(text)
     
     if ai_result:
         return {
@@ -474,7 +553,7 @@ def analyze_query(text):
             "source": "ai"
         }
     
-    # 2. Если AI не справился — используем старую логику
+    # 2. Если AI не справился — используем локальный парсер
     result = {
         "ship": detect_ship(text),
         "equipment": extract_equipment(text),
@@ -498,71 +577,19 @@ def analyze_query(text):
     return result
 
 # ============================================================
-#  ГЕНЕРАЦИЯ ОБЪЁМА РАБОТ С ИСПОЛЬЗОВАНИЕМ AI
+#  ГЕНЕРАЦИЯ ОБЪЁМА РАБОТ
 # ============================================================
 
 def generate_work_volume(defects, full_text, pump_type=None, equipment_type=None):
     """Генерирует объём работ с использованием AI"""
     
-    if GROQ_API_KEY:
-        try:
-            ai_result = generate_with_ai(defects, full_text, pump_type, equipment_type)
-            if ai_result:
-                return ai_result
-        except Exception as e:
-            print(f"❌ Ошибка AI генерации: {e}")
+    # 1. Пробуем Алису
+    ai_result = alice_router.generate_work_volume(defects, equipment_type, pump_type)
+    if ai_result:
+        return ai_result
     
+    # 2. Если AI не ответил — базовый шаблон
     return generate_base_work_volume(defects)
-
-def generate_with_ai(defects, full_text, pump_type, equipment_type):
-    """Генерация объёма работ через Groq AI"""
-    client = httpx.Client(timeout=30.0)
-    defect_text = "\n".join(defects) if defects else full_text
-    
-    equip_name = "оборудования"
-    if equipment_type == "pump":
-        equip_name = "насоса"
-        if pump_type:
-            pump_name = pump_db.get_pump_name(pump_type)
-            equip_name = f"{pump_name} насоса"
-    elif equipment_type == "engine":
-        equip_name = "двигателя"
-    
-    prompt = f"""Составь объём работ для ремонта {equip_name} по дефектам:
-{defect_text}
-
-Ответь нумерованным списком (1., 2., 3.):
-1. Демонтаж
-2. Разборка и дефектация
-3. Замена/восстановление конкретных деталей
-4. Сборка
-5. Монтаж
-6. Предъявление лицу сдающему
-
-Без лишнего текста."""
-
-    try:
-        response = client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-            json={
-                "model": "mixtral-8x7b-32768",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
-                "max_tokens": 400
-            },
-            timeout=30.0
-        )
-        
-        if response.status_code == 200:
-            return response.json()['choices'][0]['message']['content']
-        else:
-            print(f"❌ Groq API error (work volume): {response.status_code}")
-            return None
-            
-    except Exception as e:
-        print(f"❌ Ошибка генерации: {e}")
-        return None
 
 def generate_base_work_volume(defects):
     """Базовый объём работ (запасной вариант)"""
@@ -970,11 +997,22 @@ def send_welcome(message):
         "📌 Типы оборудования в базе:\n"
         "• Насосы: центробежные, шестерёнчатые, поршневые\n"
         "• Двигатели (MAN, Caterpillar и др.)\n\n"
-        "🧠 Я использую нейросеть для анализа запросов!\n\n"
+        "🧠 Я использую Яндекс.Алису для анализа запросов!\n\n"
         "📝 Примеры:\n"
         "• 'Судно Славянская, пожарный насос, повреждена крылатка. Сделай акт'\n"
         "• 'Судно Аргака, главный двигатель MAN, износ поршневых колец. Сделай акт'"
     )
+
+@bot.message_handler(commands=['stats'])
+def show_stats(message):
+    """Показывает статистику использования AI"""
+    stats = alice_router.get_stats()
+    
+    response = "📊 **Статистика AI (Алиса):**\n\n"
+    response += f"✅ Вызовов: {stats['calls']}\n"
+    response += f"❌ Ошибок: {stats['errors']}\n"
+    
+    bot.reply_to(message, response, parse_mode='Markdown')
 
 # ============================================================
 #  ГЛАВНЫЙ ОБРАБОТЧИК
@@ -1018,9 +1056,9 @@ def handle_intelligent_input(message):
             analysis = analyze_query(user_text)
             
             if analysis.get("source") == "ai":
-                bot.send_message(message.chat.id, "✅ Запрос проанализирован нейросетью")
+                bot.send_message(message.chat.id, "✅ Запрос проанализирован через Алису")
             else:
-                bot.send_message(message.chat.id, "✅ Запрос проанализирован (стандартный парсер)")
+                bot.send_message(message.chat.id, "✅ Запрос проанализирован (локальный парсер)")
             
             ship = analysis.get('ship')
             equipment = analysis.get('equipment')
@@ -1207,5 +1245,5 @@ if __name__ == '__main__':
     print("🤖 Бот-ассистент запущен!")
     print("📌 Типы оборудования в базе: насосы (центробежные, шестерёнчатые, поршневые), двигатели")
     print("📌 Доступные функции: ДА, АВР, проверка зазоров, дефекты, нормативы, чек-лист")
-    print("📌 Используется Groq AI для интеллектуального анализа запросов и генерации объёма работ")
+    print("📌 Используется Яндекс.Алиса (YandexGPT) для интеллектуального анализа и генерации")
     bot.infinity_polling()
