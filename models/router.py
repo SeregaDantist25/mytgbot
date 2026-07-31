@@ -107,33 +107,43 @@ class AIModelRouter:
             return self._parse_json(result)
         return None
     
-    def generate_work_volume(self, defects, equipment_type, pump_type=None):
-        """Генерация объёма работ через Алису"""
-        equip_name = "оборудования"
-        if equipment_type == "pump":
-            equip_name = "насоса"
-            if pump_type:
-                equip_name = f"{pump_type} насоса"
-        elif equipment_type == "engine":
-            equip_name = "двигателя"
-        
-        prompt = f"""Составь подробный объём работ для ремонта {equip_name} по следующим дефектам:
-{chr(10).join(defects) if defects else 'дефекты не указаны'}
+   def generate_work_volume(self, defects, equipment_type, pump_type=None):
+    """Генерация объёма работ (коротко, как в образце)"""
+    if not defects:
+        return "1. Демонтаж узла\n2. Разборка и дефектация\n3. Замена/восстановление деталей\n4. Сборка\n5. Монтаж\n6. Предъявление л/с"
+    
+    equip_name = "двигателя" if equipment_type == "engine" else "насоса" if equipment_type == "pump" else "оборудования"
+    
+    prompt = f"""Составь краткий объём работ для ремонта судового {equip_name}.
 
-Ответь в виде нумерованного списка:
-1. Демонтаж узла
+Дефекты: {chr(10).join(defects)}
+
+Правила:
+1. Ответь нумерованным списком (1., 2., 3., 4., 5., 6.)
+2. Каждый пункт — ОДНА короткая фраза (максимум 6-7 слов)
+3. Только конкретные действия. Без объяснений.
+4. Формат как в примере:
+   1. Демонтаж узла
+   2. Разборка и дефектация
+   3. Замена изношенных деталей
+   4. Сборка с проверкой зазоров
+   5. Монтаж
+   6. Предъявление лицу сдающему
+
+Пример для дефекта "износ поршневых колец":
+1. Демонтаж поршневой группы
 2. Разборка и дефектация
-3. Конкретные работы по замене/восстановлению деталей
+3. Замена поршневых колец
 4. Сборка с проверкой зазоров
-5. Монтаж
+5. Монтаж поршневой группы
 6. Предъявление лицу сдающему
 
-Пиши конкретно, указывай детали."""
-        
-        result = self.call_model("alice", prompt, temperature=0.3, max_tokens=400)
-        if result:
-            return result
-        return None
+Только список, без лишнего текста."""
+    
+    result = self.call(prompt, temperature=0.2, max_tokens=250)
+    if result:
+        return result
+    return None
     
     def check_clearance(self, clearance_type, value, pump_type):
         """Проверка зазоров через Алису"""
