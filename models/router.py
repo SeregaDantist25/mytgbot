@@ -2,6 +2,7 @@ import os
 import httpx
 import json
 import re
+from difflib import get_close_matches
 
 class AIModelRouter:
     def __init__(self):
@@ -16,34 +17,74 @@ class AIModelRouter:
             }
         }
         
-        # Статистика
         self.stats = {
             "alice": {"calls": 0, "errors": 0}
         }
         
-        # Названия моделей для отображения
-        self.model_names = {
-            "alice": "Алиса (YandexGPT)"
-        }
+        # Загружаем базу знаний
+        self.knowledge_base = self._load_knowledge_base()
+    
+    def _load_knowledge_base(self):
+        """Загружает базу знаний из index.json"""
+        try:
+            kb_path = os.path.join("data", "vector_store", "index.json")
+            if os.path.exists(kb_path):
+                with open(kb_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            else:
+                print("⚠️ База знаний не найдена, использую только AI")
+                return {"samples": [], "keywords": {}}
+        except Exception as e:
+            print(f"⚠️ Ошибка загрузки базы знаний: {e}")
+            return {"samples": [], "keywords": {}}
+    
+    def _find_work_by_defect(self, defect_text):
+        """Ищет объём работ по дефекту в базе знаний"""
+        if not self.knowledge_base:
+            return None
+        
+        defect_lower = defect_text.lower()
+        
+        # 1. Проверяем ключевые слова
+        keywords = self.knowledge_base.get("keywords", {})
+        for keyword, work in keywords.items():
+            if keyword in defect_lower:
+                return work
+        
+        # 2. Ищем по образцам (точное совпадение)
+        samples = self.knowledge_base.get("samples", [])
+        for sample in samples:
+            for sample_defect in sample.get("defects", []):
+                if sample_defect in defect_lower:
+                    return sample.get("work", "")
+        
+        # 3. Ищем по близости (fuzzy match)
+        all_defects = []
+        for sample in samples:
+            for defect in sample.get("defects", []):
+                all_defects.append(defect)
+        
+        if all_defects:
+            matches = get_close_matches(defect_lower, all_defects, n=1, cutoff=0.7)
+            if matches:
+                for sample in samples:
+                    if matches[0] in sample.get("defects", []):
+                        return sample.get("work", "")
+        
+        return None
     
     def get_model_config(self, model_name):
         return self.models.get(model_name)
     
     def call_model(self, model_name, prompt, temperature=0.1, max_tokens=500):
-        """Вызывает указанную модель с промптом"""
         model_config = self.get_model_config(model_name)
-        if not model_config:
-            print(f"❌ Модель {model_name} не найдена")
-            return None
-        
-        if not model_config.get('api_key'):
-            print(f"❌ API-ключ для {model_name} не найден")
+        if not model_config or not model_config.get('api_key'):
+            print(f"❌ Модель {model_name} не настроена")
             return None
         
         try:
             client = httpx.Client(timeout=30.0)
             
-            # Формат запроса для YandexGPT
             payload = {
                 "modelUri": f"gpt://{model_config['folder_id']}/{model_config['model']}/latest",
                 "completionOptions": {
@@ -69,16 +110,13 @@ class AIModelRouter:
             
             if response.status_code == 200:
                 result = response.json()
-                # Извлекаем текст ответа
                 if 'result' in result and 'alternatives' in result['result']:
                     return result['result']['alternatives'][0]['message']['text']
                 else:
-                    print(f"❌ Неожиданный формат ответа от {model_name}")
                     return None
             else:
                 self.stats[model_name]["errors"] += 1
                 print(f"❌ Ошибка {model_name}: {response.status_code}")
-                print(f"Ответ: {response.text[:200]}")
                 return None
                 
         except Exception as e:
@@ -87,79 +125,107 @@ class AIModelRouter:
             return None
     
     def analyze_query(self, text):
-        """Анализ запроса через Алису"""
-        prompt = f"""Разбери запрос пользователя и верни ответ строго в формате JSON.
-
+        """Анализ запроса через базу знаний + AI"""
+        # Сначала ищем в базе
+        defects = self._extract_defects(text)
+        if defects:
+            work = self._find_work_by_defect(defects[0])
+            if work:
+                return {
+                    "ship": self._extract_ship(text),
+                    "equipment": self._extract_equipment(text),
+                    "defects": defects,
+                    "work_volume": work,
+                    "source": "local"
+                }
+        
+        # Если не найдено — используем AI
+        prompt = f"""Разбери запрос и верни JSON.
 Запрос: {text}
-
-Ответ должен содержать поля:
-- "ship": название судна или null
-- "equipment": название оборудования
-- "equipment_type": pump/engine/compressor/other
-- "pump_type": centrifugal/gear/piston/null
-- "defects": список дефектов
-- "clearances": []
-
-Ответь ТОЛЬКО JSON. Никакого лишнего текста."""
-
+Ответь: {{"ship": "...", "equipment": "...", "equipment_type": "pump/engine/compressor/other", "pump_type": "centrifugal/gear/piston/null", "defects": [...], "clearances": []}}"""
+        
         result = self.call_model("alice", prompt, temperature=0.1, max_tokens=300)
         if result:
             return self._parse_json(result)
         return None
     
-   def generate_work_volume(self, defects, equipment_type, pump_type=None):
-    """Генерация объёма работ (коротко, как в образце)"""
-    if not defects:
-        return "1. Демонтаж узла\n2. Разборка и дефектация\n3. Замена/восстановление деталей\n4. Сборка\n5. Монтаж\n6. Предъявление л/с"
-    
-    equip_name = "двигателя" if equipment_type == "engine" else "насоса" if equipment_type == "pump" else "оборудования"
-    
-    prompt = f"""Составь краткий объём работ для ремонта судового {equip_name}.
+    def generate_work_volume(self, defects, equipment_type, pump_type=None):
+        """Генерация объёма работ через базу знаний или AI"""
+        if defects:
+            # Ищем в базе знаний
+            work = self._find_work_by_defect(defects[0])
+            if work:
+                return work
+        
+        # Если не найдено — используем AI
+        equip_name = "оборудования"
+        if equipment_type == "pump":
+            equip_name = "насоса"
+        elif equipment_type == "engine":
+            equip_name = "двигателя"
+        
+        prompt = f"""Составь краткий объём работ для ремонта судового {equip_name}.
 
 Дефекты: {chr(10).join(defects)}
 
-Правила:
-1. Ответь нумерованным списком (1., 2., 3., 4., 5., 6.)
-2. Каждый пункт — ОДНА короткая фраза (максимум 6-7 слов)
-3. Только конкретные действия. Без объяснений.
-4. Формат как в примере:
-   1. Демонтаж узла
-   2. Разборка и дефектация
-   3. Замена изношенных деталей
-   4. Сборка с проверкой зазоров
-   5. Монтаж
-   6. Предъявление лицу сдающему
-
-Пример для дефекта "износ поршневых колец":
-1. Демонтаж поршневой группы
+Ответь нумерованным списком (1., 2., 3., 4., 5., 6.):
+1. Демонтаж узла
 2. Разборка и дефектация
-3. Замена поршневых колец
+3. Замена/восстановление деталей
 4. Сборка с проверкой зазоров
-5. Монтаж поршневой группы
+5. Монтаж
 6. Предъявление лицу сдающему
 
-Только список, без лишнего текста."""
-    
-    result = self.call(prompt, temperature=0.2, max_tokens=250)
-    if result:
-        return result
-    return None
-    
-    def check_clearance(self, clearance_type, value, pump_type):
-        """Проверка зазоров через Алису"""
-        prompt = f"""Проверь зазор для {pump_type} насоса:
-Тип зазора: {clearance_type}
-Измеренное значение: {value} мм
-
-Ответь кратко: норма, превышение или занижение."""
+Без лишних слов."""
         
-        result = self.call_model("alice", prompt, temperature=0.1, max_tokens=200)
+        result = self.call_model("alice", prompt, temperature=0.3, max_tokens=300)
         if result:
             return result
         return None
     
+    def _extract_defects(self, text):
+        """Извлекает дефекты из текста (локальный парсер)"""
+        text_lower = text.lower()
+        defects = []
+        
+        defect_keywords = [
+            "износ", "течь", "коррози", "трещин", "разруш", "выкрашиван",
+            "задир", "деформац", "ржав", "люфт", "биение", "стук", "вибрац",
+            "зазор", "перегрев", "заедание", "загрязнен", "неплотн", "протечк"
+        ]
+        
+        sentences = re.split(r'[,.!?;]', text)
+        for sentence in sentences:
+            sentence_lower = sentence.lower().strip()
+            if not sentence_lower:
+                continue
+            for kw in defect_keywords:
+                if kw in sentence_lower:
+                    defects.append(sentence.strip())
+                    break
+        
+        return defects
+    
+    def _extract_ship(self, text):
+        ships = ["аргака", "пластун", "славянская", "первоуральск", "керчь", "краснодар"]
+        for ship in ships:
+            if ship in text.lower():
+                return ship.capitalize()
+        return None
+    
+    def _extract_equipment(self, text):
+        equipment_keywords = ["насос", "двигатель", "компрессор", "вентилятор", 
+                             "генератор", "кран", "лебедка", "редуктор", "гидромотор",
+                             "брашпиль", "котёл", "водонагреватель", "дизель", "мотор"]
+        for kw in equipment_keywords:
+            if kw in text.lower():
+                pattern = r'(\w+\s+){0,2}' + kw + r'(\s+\w+){0,2}'
+                match = re.search(pattern, text)
+                if match:
+                    return match.group(0).strip()
+        return None
+    
     def _parse_json(self, text):
-        """Извлекает JSON из текста"""
         try:
             json_start = text.find('{')
             json_end = text.rfind('}') + 1
