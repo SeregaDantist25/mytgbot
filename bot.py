@@ -13,6 +13,7 @@ import json
 
 # --- Настройки ---
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 
 if not BOT_TOKEN:
     raise ValueError("Переменная TELEGRAM_BOT_TOKEN не найдена!")
@@ -184,139 +185,13 @@ def ask_for_clarification(equipment):
     return f"🔍 Я нашёл упоминание '{equipment}'. Уточните, это:\n1️⃣ Насос\n2️⃣ Двигатель\n3️⃣ Другое оборудование\n\nПросто напишите номер или название."
 
 # ============================================================
-#  AI РОУТЕР (ТОЛЬКО АЛИСА)
+#  АНАЛИЗ ЗАПРОСА С ПОМОЩЬЮ AI (GROQ) — УСТАРЕЛО, НО ОСТАВЛЯЕМ
 # ============================================================
 
-class AliceRouter:
-    def __init__(self):
-        self.api_key = os.environ.get('ALICE_API_KEY')
-        self.folder_id = os.environ.get('YANDEX_FOLDER_ID')
-        self.url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
-        self.stats = {"calls": 0, "errors": 0}
-        
-        if not self.api_key:
-            print("❌ ALICE_API_KEY не найден")
-        if not self.folder_id:
-            print("❌ YANDEX_FOLDER_ID не найден")
-    
-    def call(self, prompt, temperature=0.1, max_tokens=500):
-        """Вызывает Алису"""
-        if not self.api_key or not self.folder_id:
-            return None
-        
-        try:
-            client = httpx.Client(timeout=30.0)
-            
-            payload = {
-                "modelUri": f"gpt://{self.folder_id}/yandexgpt/latest",
-                "completionOptions": {
-                    "stream": False,
-                    "temperature": temperature,
-                    "maxTokens": max_tokens
-                },
-                "messages": [
-                    {"role": "user", "text": prompt}
-                ]
-            }
-            
-            response = client.post(
-                self.url,
-                headers={
-                    "Authorization": f"Api-Key {self.api_key}",
-                    "Content-Type": "application/json"
-                },
-                json=payload
-            )
-            
-            self.stats["calls"] += 1
-            
-            if response.status_code == 200:
-                result = response.json()
-                if 'result' in result and 'alternatives' in result['result']:
-                    return result['result']['alternatives'][0]['message']['text']
-                else:
-                    print(f"❌ Неожиданный формат ответа")
-                    return None
-            else:
-                self.stats["errors"] += 1
-                print(f"❌ Ошибка Алисы: {response.status_code}")
-                print(f"Ответ: {response.text[:200]}")
-                return None
-                
-        except Exception as e:
-            self.stats["errors"] += 1
-            print(f"❌ Ошибка Алисы: {e}")
-            return None
-    
-    def analyze_query(self, text):
-        """Анализ запроса"""
-        prompt = f"""Разбери запрос пользователя и верни ответ строго в формате JSON.
-
-Запрос: {text}
-
-Ответ должен содержать поля:
-- "ship": название судна или null
-- "equipment": название оборудования
-- "equipment_type": pump/engine/compressor/other
-- "pump_type": centrifugal/gear/piston/null
-- "defects": список дефектов
-- "clearances": []
-
-Ответь ТОЛЬКО JSON. Никакого лишнего текста."""
-
-        result = self.call(prompt, temperature=0.1, max_tokens=300)
-        if result:
-            return self._parse_json(result)
-        return None
-    
-    def generate_work_volume(self, defects, equipment_type, pump_type=None):
-        """Генерация объёма работ"""
-        equip_name = "оборудования"
-        if equipment_type == "pump":
-            equip_name = "насоса"
-            if pump_type:
-                pump_name = pump_db.get_pump_name(pump_type) if pump_type else ""
-                equip_name = f"{pump_name} насоса"
-        elif equipment_type == "engine":
-            equip_name = "двигателя"
-        
-        prompt = f"""Составь подробный объём работ для ремонта {equip_name} по следующим дефектам:
-{chr(10).join(defects) if defects else 'дефекты не указаны'}
-
-Ответь в виде нумерованного списка:
-1. Демонтаж узла
-2. Разборка и дефектация
-3. Конкретные работы по замене/восстановлению деталей
-4. Сборка с проверкой зазоров
-5. Монтаж
-6. Предъявление лицу сдающему
-
-Пиши конкретно, указывай детали."""
-        
-        result = self.call(prompt, temperature=0.3, max_tokens=400)
-        if result:
-            return result
-        return None
-    
-    def _parse_json(self, text):
-        """Извлекает JSON из текста"""
-        try:
-            json_start = text.find('{')
-            json_end = text.rfind('}') + 1
-            if json_start != -1 and json_end != -1:
-                return json.loads(text[json_start:json_end])
-        except:
-            pass
-        return None
-    
-    def get_stats(self):
-        return self.stats
-
-# Создаём глобальный экземпляр роутера
-alice_router = AliceRouter()
+# (функции analyze_with_ai и т.д. удалены, они не используются)
 
 # ============================================================
-#  РАСШИРЕННЫЙ АНАЛИЗ ЗАПРОСОВ
+#  РАСШИРЕННЫЙ АНАЛИЗ ЗАПРОСОВ (С AI)
 # ============================================================
 
 def detect_ship(text):
@@ -538,8 +413,13 @@ def parse_works_for_avr(text):
 def analyze_query(text):
     """Полный анализ запроса с использованием AI"""
     
-    # 1. Пробуем Алису
-    ai_result = alice_router.analyze_query(text)
+    # Пробуем загрузить router только если нужно
+    ai_result = None
+    try:
+        from models.router import router
+        ai_result = router.analyze_query(text)
+    except Exception as e:
+        print(f"⚠️ Ошибка при импорте router: {e}")
     
     if ai_result:
         return {
@@ -553,7 +433,7 @@ def analyze_query(text):
             "source": "ai"
         }
     
-    # 2. Если AI не справился — используем локальный парсер
+    # Локальный парсер
     result = {
         "ship": detect_ship(text),
         "equipment": extract_equipment(text),
@@ -577,18 +457,36 @@ def analyze_query(text):
     return result
 
 # ============================================================
-#  ГЕНЕРАЦИЯ ОБЪЁМА РАБОТ
+#  ГЕНЕРАЦИЯ ОБЪЁМА РАБОТ (ИСПРАВЛЕННАЯ)
 # ============================================================
 
 def generate_work_volume(defects, full_text, pump_type=None, equipment_type=None):
-    """Генерирует объём работ с использованием AI"""
+    """Генерирует объём работ с использованием базы знаний или AI"""
     
-    # 1. Пробуем Алису
-    ai_result = alice_router.generate_work_volume(defects, equipment_type, pump_type)
-    if ai_result:
-        return ai_result
+    # 1. Если есть оборудование и дефекты — пытаемся найти в базе знаний
+    if equipment_type and defects:
+        try:
+            from models.router import router
+            # Ищем в базе знаний
+            work = router._find_work_by_defect(defects[0])
+            if work:
+                print(f"✅ Найдено в базе знаний: {work}")
+                return work
+        except Exception as e:
+            print(f"⚠️ Ошибка при поиске в базе: {e}")
     
-    # 2. Если AI не ответил — базовый шаблон
+    # 2. Пробуем Алису через router
+    try:
+        from models.router import router
+        ai_result = router.generate_work_volume(defects, equipment_type, pump_type)
+        if ai_result:
+            print(f"✅ Сгенерировано через Алису")
+            return ai_result
+    except Exception as e:
+        print(f"⚠️ Ошибка при вызове Алисы: {e}")
+    
+    # 3. Если ничего не помогло — базовый шаблон
+    print("⚠️ Использую базовый шаблон")
     return generate_base_work_volume(defects)
 
 def generate_base_work_volume(defects):
@@ -997,7 +895,7 @@ def send_welcome(message):
         "📌 Типы оборудования в базе:\n"
         "• Насосы: центробежные, шестерёнчатые, поршневые\n"
         "• Двигатели (MAN, Caterpillar и др.)\n\n"
-        "🧠 Я использую Яндекс.Алису для анализа запросов!\n\n"
+        "🧠 Я использую Яндекс.Алису и базу знаний для анализа запросов!\n\n"
         "📝 Примеры:\n"
         "• 'Судно Славянская, пожарный насос, повреждена крылатка. Сделай акт'\n"
         "• 'Судно Аргака, главный двигатель MAN, износ поршневых колец. Сделай акт'"
@@ -1006,13 +904,15 @@ def send_welcome(message):
 @bot.message_handler(commands=['stats'])
 def show_stats(message):
     """Показывает статистику использования AI"""
-    stats = alice_router.get_stats()
-    
-    response = "📊 **Статистика AI (Алиса):**\n\n"
-    response += f"✅ Вызовов: {stats['calls']}\n"
-    response += f"❌ Ошибок: {stats['errors']}\n"
-    
-    bot.reply_to(message, response, parse_mode='Markdown')
+    try:
+        from models.router import router
+        stats = router.get_stats()
+        response = "📊 **Статистика AI (Алиса):**\n\n"
+        response += f"✅ Вызовов: {stats['calls']}\n"
+        response += f"❌ Ошибок: {stats['errors']}\n"
+        bot.reply_to(message, response, parse_mode='Markdown')
+    except:
+        bot.reply_to(message, "❌ Статистика недоступна")
 
 # ============================================================
 #  ГЛАВНЫЙ ОБРАБОТЧИК
@@ -1056,7 +956,7 @@ def handle_intelligent_input(message):
             analysis = analyze_query(user_text)
             
             if analysis.get("source") == "ai":
-                bot.send_message(message.chat.id, "✅ Запрос проанализирован через Алису")
+                bot.send_message(message.chat.id, "✅ Запрос проанализирован через базу знаний")
             else:
                 bot.send_message(message.chat.id, "✅ Запрос проанализирован (локальный парсер)")
             
@@ -1245,5 +1145,5 @@ if __name__ == '__main__':
     print("🤖 Бот-ассистент запущен!")
     print("📌 Типы оборудования в базе: насосы (центробежные, шестерёнчатые, поршневые), двигатели")
     print("📌 Доступные функции: ДА, АВР, проверка зазоров, дефекты, нормативы, чек-лист")
-    print("📌 Используется Яндекс.Алиса (YandexGPT) для интеллектуального анализа и генерации")
+    print("📌 Используется Яндекс.Алиса и база знаний для интеллектуального анализа")
     bot.infinity_polling()
