@@ -756,13 +756,11 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
         "date": date_str,
         "ship": ship or "Не указано",
         "equipment": equipment or "Не указано",
-        "work_object": "Текущий ремонт"
+        "work_object": "Текущий ремонт",
+        "purpose": "Определение технического состояния и объема ремонта",
+        "basis": "План-график ремонта на 2026 год"
     }
     
-    if show_purpose:
-        placeholders["purpose"] = "По назначению"
-    if show_basis:
-        placeholders["basis"] = "По заявке"
     if show_conclusion:
         placeholders["conclusion"] = "Детали подлежат замене/восстановлению согласно указанному объёму работ."
     if show_notes:
