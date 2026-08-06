@@ -1031,7 +1031,7 @@ def handle_message(message):
     
     # ---- 3. ПРОВЕРКА ПО ГОСТАМ ----
     if any(word in text_lower for word in ['проверь по госту', 'по ГОСТ', 'по госту', 'гост']):
-        gost_match = re.search(r'гост\s*([\d-]+)', text, re.IGNORECASE)
+        gost_match = re.search(r'гост\s*([\d-]+)', user_text, re.IGNORECASE)
         if gost_match and gost_checker:
             gost_id = gost_match.group(1)
             param_match = re.search(r'(\w+)\s*[=:]\s*([\d.]+)', text)
