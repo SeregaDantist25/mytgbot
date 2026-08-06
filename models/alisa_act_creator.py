@@ -12,19 +12,18 @@ class AlisaActCreator:
         self.folder_id = os.environ.get('YANDEX_FOLDER_ID')
         self.templates_dir = "templates"
         self.examples_dir = "data/act_examples"
+        print(f"🔧 AlisaActCreator инициализирован. API Key: {'есть' if self.api_key else 'НЕТ'}")
     
     def _load_template_text(self) -> str:
         """Загружает текст шаблона для контекста Алисы"""
         try:
             doc = Document(os.path.join(self.templates_dir, "defect_act_template.docx"))
             
-            # Извлекаем текст
             text_parts = []
             for paragraph in doc.paragraphs:
                 if paragraph.text.strip():
                     text_parts.append(paragraph.text)
             
-            # Извлекаем структуру таблицы
             table_text = []
             for table in doc.tables:
                 for row in table.rows:
@@ -52,7 +51,7 @@ class AlisaActCreator:
                         with open(os.path.join(self.examples_dir, file), 'r', encoding='utf-8') as f:
                             data = json.load(f)
                             examples.append(json.dumps(data, ensure_ascii=False, indent=2))
-            return "\n\n---\n\n".join(examples[:3]) if examples else "Примеры не загружены"
+            return "\n\n---\n\n".join(examples[:5]) if examples else "Примеры не загружены"
         except Exception as e:
             print(f"⚠️ Ошибка загрузки примеров: {e}")
             return "Примеры не загружены"
@@ -67,7 +66,7 @@ class AlisaActCreator:
 
 ## ШАБЛОН АКТА ДЕФЕКТАЦИИ:
 
-{template_text[:3000]}
+{template_text[:2000]}
 
 ## ПРИМЕРЫ ЗАПОЛНЕННЫХ АКТОВ:
 
@@ -100,9 +99,11 @@ class AlisaActCreator:
 
 ОТВЕТЬ ТОЛЬКО JSON-ОБЪЕКТОМ, БЕЗ ЛИШНЕГО ТЕКСТА!"""
 
+            print(f"🧠 Отправляем запрос в Алису для генерации акта...")
             response = self._call_yandex_gpt(prompt)
             
             if not response:
+                print(f"⚠️ Алиса не ответила, использую локальный парсер")
                 return self._fallback_act_data(user_text)
             
             return self._parse_act_data(response, user_text)
@@ -166,17 +167,57 @@ class AlisaActCreator:
         return self._fallback_act_data(fallback_text)
     
     def _fallback_act_data(self, text: str) -> Dict:
-        """Запасной вариант — локальный парсер"""
-        from bot import detect_ship, extract_equipment, extract_defects, generate_base_work_volume
+        """Запасной вариант — локальный парсер (без циклического импорта)"""
+        # Локальные функции, чтобы не импортировать из bot.py
+        import re
         
-        defects = extract_defects(text) or ["Не указано"]
+        # Определяем судно
+        ships = ["аргака", "пластун", "славянская", "первоуральск", "керчь", "краснодар", "алеут"]
+        ship = "Не указано"
+        for s in ships:
+            if s in text.lower():
+                ship = s.capitalize()
+                break
+        
+        # Определяем оборудование
+        equipment_keywords = ["насос", "двигатель", "компрессор", "вентилятор", "генератор"]
+        equipment = "Не указано"
+        for kw in equipment_keywords:
+            if kw in text.lower():
+                equipment = kw.capitalize()
+                break
+        
+        # Извлекаем дефекты
+        defects = []
+        defect_keywords = ["износ", "течь", "коррози", "трещин", "зазор", "люфт", "биение"]
+        sentences = re.split(r'[,.!?;]', text)
+        for sentence in sentences:
+            for kw in defect_keywords:
+                if kw in sentence.lower():
+                    defects.append(sentence.strip())
+                    break
+        
+        if not defects:
+            defects = ["Не указано"]
+        
+        # Генерируем объём работ
+        work_lines = ["1. Демонтаж узла", "2. Разборка и дефектация"]
+        for defect in defects:
+            if "износ" in defect.lower():
+                work_lines.append("3. Замена/восстановление изношенных деталей")
+                break
+        else:
+            work_lines.append("3. Замена/восстановление деталей")
+        work_lines.append("4. Сборка с проверкой зазоров")
+        work_lines.append("5. Монтаж")
+        work_lines.append("6. Предъявление лицу сдающему")
         
         return {
-            "ship": detect_ship(text) or "Не указано",
-            "equipment": extract_equipment(text) or "Не указано",
+            "ship": ship,
+            "equipment": equipment if equipment != "Не указано" else "Оборудование",
             "repair_type": "Текущий ремонт",
             "defects": defects,
-            "work_volume": generate_base_work_volume(defects),
+            "work_volume": "\n".join(work_lines),
             "conclusion": "Детали подлежат замене/восстановлению согласно указанному объёму работ."
         }
 
