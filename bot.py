@@ -630,7 +630,7 @@ def build_defect_table_engine(defects, work_volume):
             section = "Прочее"
         
         rows.append({
-            "num": f"{i}.{i}",
+            "num": str(i),
             "defect": defect,
             "work": work_volume,
             "unit": "компл.",
