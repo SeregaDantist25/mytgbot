@@ -28,7 +28,7 @@ CHECKLISTS_FILE = os.path.join(DATA_DIR, "checklists.json")
 COUNTERS_FILE = os.path.join(DATA_DIR, "counters.json")
 
 # ============================================================
-#  ИМПОРТ ГОСТ ЧЕКЕРА
+#  ИМПОРТ ГОСТ ЧЕКЕРА И АЛИСЫ
 # ============================================================
 
 try:
@@ -38,6 +38,16 @@ try:
 except Exception as e:
     print(f"⚠️ Ошибка при загрузке ГОСТ чекера: {e}")
     gost_checker = None
+
+# Пытаемся загрузить Алису (ai_router)
+alisa_router = None
+try:
+    from models.ai_router import router as alisa_router
+    print(f"✅ Алиса (YandexGPT) загружена успешно!")
+except ImportError as e:
+    print(f"⚠️ Модуль ai_router не найден: {e}")
+except Exception as e:
+    print(f"⚠️ Ошибка при загрузке Алисы: {e}")
 
 # ============================================================
 #  ЗАГРУЗКА ДАННЫХ ИЗ JSON
@@ -416,30 +426,8 @@ def parse_works_for_avr(text):
     
     return works
 
-def analyze_query(text):
-    """Полный анализ запроса с использованием AI"""
-    
-    # Пробуем загрузить router только если нужно
-    ai_result = None
-    try:
-        from models.router import router
-        ai_result = router.analyze_query(text)
-    except Exception as e:
-        print(f"⚠️ Ошибка при импорте router: {e}")
-    
-    if ai_result:
-        return {
-            "ship": ai_result.get("ship"),
-            "equipment": ai_result.get("equipment"),
-            "defects": ai_result.get("defects", []),
-            "pump_type": ai_result.get("pump_type"),
-            "equipment_type": ai_result.get("equipment_type"),
-            "clearances": ai_result.get("clearances", []),
-            "full_text": text,
-            "source": "ai"
-        }
-    
-    # Локальный парсер
+def analyze_query_local(text):
+    """Локальный анализ запроса (без AI)"""
     result = {
         "ship": detect_ship(text),
         "equipment": extract_equipment(text),
@@ -469,26 +457,26 @@ def analyze_query(text):
 def generate_work_volume(defects, full_text, pump_type=None, equipment_type=None):
     """Генерирует объём работ с использованием базы знаний или AI"""
     
-    # 1. Если есть оборудование и дефекты — пытаемся найти в базе знаний
+    # 1. Пробуем Алису через ai_router
+    if alisa_router:
+        try:
+            ai_result = alisa_router.generate_work_volume(defects, equipment_type, pump_type)
+            if ai_result:
+                print(f"✅ Сгенерировано через Алису")
+                return ai_result
+        except Exception as e:
+            print(f"⚠️ Ошибка при вызове Алисы: {e}")
+    
+    # 2. Если есть оборудование и дефекты — пытаемся найти в старой базе знаний
     if equipment_type and defects:
         try:
             from models.router import router
             work = router._find_work_by_defect(defects[0])
             if work:
-                print(f"✅ Найдено в базе знаний: {work}")
+                print(f"✅ Найдено в старой базе знаний: {work}")
                 return work
         except Exception as e:
-            print(f"⚠️ Ошибка при поиске в базе: {e}")
-    
-    # 2. Пробуем Алису через router
-    try:
-        from models.router import router
-        ai_result = router.generate_work_volume(defects, equipment_type, pump_type)
-        if ai_result:
-            print(f"✅ Сгенерировано через Алису")
-            return ai_result
-    except Exception as e:
-        print(f"⚠️ Ошибка при вызове Алисы: {e}")
+            print(f"⚠️ Ошибка при поиске в старой базе: {e}")
     
     # 3. Если ничего не помогло — базовый шаблон
     print("⚠️ Использую базовый шаблон")
@@ -657,7 +645,7 @@ def build_defect_table_engine(defects, work_volume):
 # ============================================================
 
 def create_defect_document(ship, equipment, defects, work_volume, pump_type=None):
-    """Создаёт акт дефектации с таблицей, подходящей под тип оборудования"""
+    """Созда center акта дефектации с таблицей, подходящей под тип оборудования"""
     doc = load_template("defect_act_template.docx")
     
     number = get_counter("da")
@@ -916,15 +904,18 @@ def send_welcome(message):
 @bot.message_handler(commands=['stats'])
 def show_stats(message):
     """Показывает статистику использования AI"""
-    try:
-        from models.router import router
-        stats = router.get_stats()
-        response = "📊 **Статистика AI (Алиса):**\n\n"
-        response += f"✅ Вызовов: {stats['calls']}\n"
-        response += f"❌ Ошибок: {stats['errors']}\n"
-        bot.reply_to(message, response, parse_mode='Markdown')
-    except:
-        bot.reply_to(message, "❌ Статистика недоступна")
+    if alisa_router:
+        try:
+            stats = alisa_router.get_stats()
+            response = "📊 **Статистика Алисы (YandexGPT):**\n\n"
+            response += f"✅ Вызовов: {stats['calls']}\n"
+            response += f"❌ Ошибок: {stats['errors']}\n"
+            bot.reply_to(message, response, parse_mode='Markdown')
+            return
+        except Exception as e:
+            print(f"⚠️ Ошибка при получении статистики: {e}")
+    
+    bot.reply_to(message, "❌ Статистика недоступна")
 
 # ============================================================
 #  КОМАНДА /GOSTS — СПИСОК ВСЕХ ГОСТОВ
@@ -996,19 +987,23 @@ def search_gosts(message):
     bot.reply_to(message, response, parse_mode='Markdown')
 
 # ============================================================
-#  ГЛАВНЫЙ ОБРАБОТЧИК
+#  ГЛАВНЫЙ ОБРАБОТЧИК (ЧЕРЕЗ АЛИСУ)
 # ============================================================
 
 clarification_states = {}
 
+# История диалогов для контекста (для Алисы)
+user_histories = {}
+
 @bot.message_handler(func=lambda message: True)
-def handle_intelligent_input(message):
+def handle_message(message):
     user_text = message.text
     text_lower = user_text.lower()
     
     if user_text.startswith('/'):
         return
     
+    # --- ОБРАБОТКА УТОЧНЕНИЙ ---
     if message.chat.id in clarification_states and clarification_states[message.chat.id]:
         equipment_type = text_lower
         if "1" in equipment_type or "насос" in equipment_type:
@@ -1024,98 +1019,28 @@ def handle_intelligent_input(message):
             bot.reply_to(message, "✅ Принято: другое оборудование")
             return
     
-    # ---- 1. АКТ ДЕФЕКТАЦИИ ----
-    wants_act = any(word in text_lower for word in [
-        'акт', 'дефектовк', 'сделай акт', 'оформи', 'составь', 'создай',
-        'двигател', 'мотор', 'дизель', 'гд', 'насос', 'помп'
-    ])
+    # ---- 1. БЫСТРЫЕ КОМАНДЫ (БЕЗ АЛИСЫ) ----
     
-    if wants_act:
-        try:
-            bot.send_message(message.chat.id, "🧠 Анализирую запрос...")
-            
-            analysis = analyze_query(user_text)
-            
-            if analysis.get("source") == "ai":
-                bot.send_message(message.chat.id, "✅ Запрос проанализирован через базу знаний")
-            else:
-                bot.send_message(message.chat.id, "✅ Запрос проанализирован (локальный парсер)")
-            
-            ship = analysis.get('ship')
-            equipment = analysis.get('equipment')
-            defects = analysis.get('defects', [])
-            pump_type = analysis.get('pump_type')
-            equipment_type = analysis.get('equipment_type')
-            clearances = analysis.get('clearances', [])
-            
-            if not equipment:
-                bot.reply_to(message, "🤔 Не удалось определить оборудование. Уточните: это насос, двигатель или другое оборудование?")
-                return
-            
-            if not equipment_type or equipment_type == "other":
-                equip_type = detect_equipment_type(equipment)
-                if equip_type is None:
-                    clarification_states[message.chat.id] = True
-                    bot.reply_to(message, ask_for_clarification(equipment))
-                    return
-                else:
-                    equipment_type = equip_type
-            
-            for c in clearances:
-                defect_text = f"зазор {c['type']}: {c['value']} мм"
-                if defect_text not in defects:
-                    defects.append(defect_text)
-            
-            if not defects:
-                for kw in ["износ", "течь", "коррози", "трещин", "выкрашиван", "задир", "деформац", "люфт", "зазор", "загрязнен", "неплотн", "протечк"]:
-                    if kw in text_lower:
-                        defects.append(kw)
-                if not defects:
-                    bot.reply_to(message, "🤔 Я не нашёл дефектов в вашем сообщении. Опишите дефекты подробнее.")
-                    return
-            
-            if not equipment:
-                if "двигател" in text_lower or "мотор" in text_lower or "дизель" in text_lower:
-                    equipment = "двигатель"
-                else:
-                    pump_name = pump_db.get_pump_name(pump_type) if pump_type else ""
-                    equipment = f"насос {pump_name}".strip() if pump_name else "насос"
-            
-            work_volume = generate_work_volume(defects, user_text, pump_type, equipment_type)
-            file_stream = create_defect_document(ship, equipment, defects, work_volume, pump_type)
-            
-            bot.send_document(
-                message.chat.id, 
-                file_stream, 
-                visible_file_name=f'Акт_дефектации_{ship or "судна"}.docx'
-            )
-            bot.send_message(message.chat.id, "📄 Акт дефектации в Word отправлен!")
-            
-        except Exception as e:
-            import traceback
-            error_text = f"❌ Ошибка при создании акта:\n\n{str(e)}\n\n{traceback.format_exc()}"
-            if len(error_text) > 4000:
-                error_text = error_text[:4000] + "\n\n... (обрезано)"
-            bot.send_message(message.chat.id, error_text)
-            print(error_text)
+    # Создание акта
+    if any(word in text_lower for word in ['сделай акт', 'акт дефектации', 'оформи акт', 'составь акт']):
+        handle_act_creation(message, user_text)
         return
     
-    # ---- 1.5 ПРОВЕРКА ПО ГОСТАМ (НОВЫЙ БЛОК) ----
-    if any(word in text_lower for word in ['проверь по госту', 'гост', 'соответствие госту', 'по ГОСТ', 'по госту']):
-        if not gost_checker:
-            bot.reply_to(message, "❌ ГОСТ чекер не загружен. Проверьте файл gost_checker.py")
-            return
-        
-        # Ищем явное указание ГОСТа
+    # Создание АВР
+    if any(word in text_lower for word in ['авр', 'акт выполненных', 'сделай авр', 'оформи авр']):
+        handle_avr_creation(message, user_text)
+        return
+    
+    # Проверка по ГОСТам (явная)
+    if any(word in text_lower for word in ['проверь по госту', 'по ГОСТ', 'по госту', 'гост']):
+        # Пытаемся распарсить ГОСТ
         gost_match = re.search(r'гост\s*([\d-]+)', text, re.IGNORECASE)
-        
-        if gost_match:
+        if gost_match and gost_checker:
             gost_id = gost_match.group(1)
             param_match = re.search(r'(\w+)\s*[=:]\s*([\d.]+)', text)
             if param_match:
                 param_name = param_match.group(1).strip()
                 value = float(param_match.group(2))
-                
                 result = gost_checker.check_parameter(gost_id, param_name, value)
                 
                 response = f"📊 **Проверка по ГОСТ {gost_id}**\n\n"
@@ -1127,93 +1052,175 @@ def handle_intelligent_input(message):
                 
                 bot.reply_to(message, response, parse_mode='Markdown')
                 return
-        
-        # Если не нашли явное указание, пробуем интеллектуальный поиск
-        param_match = re.search(r'(\w+)\s*[=:]\s*([\d.]+)', text_lower)
-        if param_match:
-            param_name = param_match.group(1)
-            value = float(param_match.group(2))
-            
-            # Подбираем ГОСТ по параметру
-            gost_mapping = {
-                "диаметр": "3325-85",
-                "diameter": "3325-85",
-                "d": "3325-85",
-                "зазор": "3325-85",
-                "clearance": "3325-85",
-                "ra": "2789-73",
-                "шероховатость": "2789-73",
-                "давление": "34252-2017",
-                "pressure": "34252-2017",
-                "подача": "18863-89",
-                "flow": "18863-89",
-                "допуск": "25346-2013",
-                "tolerance": "25346-2013",
-                "биение": "24643-81",
-                "runout": "24643-81",
-            }
-            
-            gost_id = None
-            for key, gid in gost_mapping.items():
-                if key in param_name.lower() or key in text_lower:
-                    gost_id = gid
-                    break
-            
-            if gost_id:
-                result = gost_checker.check_parameter(gost_id, param_name, value)
-                response = f"📊 **Проверка параметра по ГОСТ {gost_id}**\n\n"
-                response += f"🔹 Параметр: {param_name}\n"
-                response += f"🔹 Значение: {value}\n\n"
-                response += f"{result.get('message', '')}"
-                if result.get('action'):
-                    response += f"\n\n🔧 **Рекомендация:** {result['action']}"
-                bot.reply_to(message, response, parse_mode='Markdown')
-                return
-            else:
-                # Показываем список подходящих ГОСТов
-                gosts = gost_checker.search(param_name)
-                if gosts:
-                    response = f"📋 **Найдены ГОСТы с параметром '{param_name}':**\n\n"
-                    for gost_id, data in list(gosts.items())[:5]:
-                        response += f"• **{gost_id}** — {data.get('title', '')[:50]}...\n"
-                    response += "\n💡 Уточните запрос: `проверь по ГОСТ {номер} {параметр}={значение}`"
-                    bot.reply_to(message, response, parse_mode='Markdown')
-                    return
-        
-        # Если ничего не нашли
-        bot.reply_to(message,
-            "🔍 **Проверка по ГОСТам**\n\n"
-            "Используйте формат:\n"
-            "`проверь по ГОСТ 520-2011 диаметр=50`\n"
-            "`проверь по ГОСТ 3325-85 зазор=0.15`\n"
-            "`проверь по ГОСТ 2789-73 ra=1.6`\n\n"
-            "📋 Список всех ГОСТов: `/gosts`\n"
-            "🔎 Поиск по ГОСТам: `/search подшипник`"
-        )
-        return
     
-    # ---- 2. АВР ----
-    if any(word in text_lower for word in ['авр', 'акт выполненных', 'выполненные работы']):
-        ship = detect_ship(user_text)
-        works = parse_works_for_avr(user_text)
+    # ---- 2. ВСЁ ОСТАЛЬНОЕ — ЧЕРЕЗ АЛИСУ ----
+    
+    if alisa_router:
+        # Получаем историю пользователя
+        user_id = message.chat.id
+        if user_id not in user_histories:
+            user_histories[user_id] = []
         
-        if not works:
-            bot.reply_to(message,
-                "🤔 Для создания АВР опишите выполненные работы:\n"
-                "Пример: 'АВР: Кабель-трасса: замена уголков 44 шт, болтов 194 шт.'"
-            )
+        history = user_histories[user_id]
+        
+        # Отправляем в Алису
+        try:
+            bot.send_chat_action(message.chat.id, 'typing')
+            result = alisa_router.process_query(user_text, history)
+            
+            # Сохраняем в историю
+            history.append(f"Пользователь: {user_text}")
+            history.append(f"Бот: {result.get('response', '')[:200]}")
+            if len(history) > 10:
+                history = history[-10:]
+            user_histories[user_id] = history
+            
+            # Отправляем ответ
+            if result.get('status') == 'ok':
+                bot.reply_to(message, result.get('response', 'Извините, не удалось получить ответ.'))
+            else:
+                # Если Алиса вернула ошибку — пробуем локальный режим
+                bot.reply_to(message, "🤔 Попробую ответить без Алисы...")
+                handle_local_fallback(message, user_text)
+                
+        except Exception as e:
+            print(f"⚠️ Ошибка при вызове Алисы: {e}")
+            bot.reply_to(message, "⚠️ Произошла ошибка при обращении к Алисе. Отвечаю в локальном режиме.")
+            handle_local_fallback(message, user_text)
+    else:
+        # Алиса недоступна — локальный режим
+        handle_local_fallback(message, user_text)
+
+
+# ============================================================
+#  ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ОБРАБОТЧИКА
+# ============================================================
+
+def handle_act_creation(message, user_text):
+    """Создание Акта дефектации"""
+    try:
+        bot.send_message(message.chat.id, "🧠 Анализирую запрос для создания акта...")
+        
+        analysis = analyze_query_local(user_text)
+        
+        ship = analysis.get('ship')
+        equipment = analysis.get('equipment')
+        defects = analysis.get('defects', [])
+        pump_type = analysis.get('pump_type')
+        equipment_type = analysis.get('equipment_type')
+        clearances = analysis.get('clearances', [])
+        
+        if not equipment:
+            bot.reply_to(message, "🤔 Не удалось определить оборудование. Уточните: это насос, двигатель или другое оборудование?")
             return
         
-        file_stream = create_avr_document(ship, works)
+        if not equipment_type or equipment_type == "other":
+            equip_type = detect_equipment_type(equipment)
+            if equip_type is None:
+                clarification_states[message.chat.id] = True
+                bot.reply_to(message, ask_for_clarification(equipment))
+                return
+            else:
+                equipment_type = equip_type
+        
+        for c in clearances:
+            defect_text = f"зазор {c['type']}: {c['value']} мм"
+            if defect_text not in defects:
+                defects.append(defect_text)
+        
+        if not defects:
+            for kw in ["износ", "течь", "коррози", "трещин", "выкрашиван", "задир", "деформац", "люфт", "зазор", "загрязнен", "неплотн", "протечк"]:
+                if kw in user_text.lower():
+                    defects.append(kw)
+            if not defects:
+                bot.reply_to(message, "🤔 Я не нашёл дефектов. Опишите дефекты подробнее.")
+                return
+        
+        if not equipment:
+            if "двигател" in user_text.lower() or "мотор" in user_text.lower() or "дизель" in user_text.lower():
+                equipment = "двигатель"
+            else:
+                pump_name = pump_db.get_pump_name(pump_type) if pump_type else ""
+                equipment = f"насос {pump_name}".strip() if pump_name else "насос"
+        
+        work_volume = generate_work_volume(defects, user_text, pump_type, equipment_type)
+        file_stream = create_defect_document(ship, equipment, defects, work_volume, pump_type)
+        
         bot.send_document(
-            message.chat.id,
-            file_stream,
-            visible_file_name=f'АВР_{ship or "судна"}.docx'
+            message.chat.id, 
+            file_stream, 
+            visible_file_name=f'Акт_дефектации_{ship or "судна"}.docx'
         )
-        bot.send_message(message.chat.id, "📄 Акт выполненных работ отправлен!")
+        bot.send_message(message.chat.id, "📄 Акт дефектации в Word отправлен!")
+        
+    except Exception as e:
+        import traceback
+        error_text = f"❌ Ошибка при создании акта:\n\n{str(e)}"
+        bot.send_message(message.chat.id, error_text)
+        print(traceback.format_exc())
+
+
+def handle_avr_creation(message, user_text):
+    """Создание Акта выполненных работ"""
+    ship = detect_ship(user_text)
+    works = parse_works_for_avr(user_text)
+    
+    if not works:
+        bot.reply_to(message,
+            "🤔 Для создания АВР опишите выполненные работы:\n"
+            "Пример: 'АВР: Кабель-трасса: замена уголков 44 шт, болтов 194 шт.'"
+        )
         return
     
-    # ---- 3. ЧЕК-ЛИСТ ----
+    file_stream = create_avr_document(ship, works)
+    bot.send_document(
+        message.chat.id,
+        file_stream,
+        visible_file_name=f'АВР_{ship or "судна"}.docx'
+    )
+    bot.send_message(message.chat.id, "📄 Акт выполненных работ отправлен!")
+
+
+def handle_local_fallback(message, user_text):
+    """Локальный режим работы (без Алисы)"""
+    text_lower = user_text.lower()
+    
+    # Проверка зазоров
+    if any(word in text_lower for word in ['проверь зазор', 'проверка зазора', 'какой зазор', 'норма зазора']):
+        clearances = extract_clearances_from_text(user_text)
+        if clearances:
+            responses = []
+            for c in clearances:
+                if c['type'] != 'unknown':
+                    pump_type = detect_pump_type(user_text)
+                    if not pump_type:
+                        if "шестерен" in text_lower or "ротан" in text_lower:
+                            pump_type = "gear"
+                        elif "поршн" in text_lower or "плунж" in text_lower or "паровой" in text_lower:
+                            pump_type = "piston"
+                        else:
+                            pump_type = "centrifugal"
+                    
+                    result = pump_db.check_clearance(pump_type, c['type'], c['value'])
+                    responses.append(f"🔹 {c['type']}: {c['value']} мм -> {result['message']}")
+                    
+                    # Проверка по ГОСТам
+                    if gost_checker:
+                        if c['type'] == 'bearing':
+                            gost_result = gost_checker.check_parameter("3325-85", "clearance", c['value'])
+                            if gost_result.get('status') != 'error':
+                                responses.append(f"   📌 ГОСТ 3325-85: {gost_result.get('message', '')}")
+                        elif c['type'] == 'axial' or c['type'] == 'radial':
+                            gost_result = gost_checker.check_parameter("24643-81", "runout", c['value'])
+                            if gost_result.get('status') != 'error':
+                                responses.append(f"   📌 ГОСТ 24643-81: {gost_result.get('message', '')}")
+            
+            if responses:
+                response = "📊 **Результаты проверки зазоров:**\n\n" + "\n".join(responses)
+                bot.reply_to(message, response, parse_mode='Markdown')
+                return
+    
+    # Чек-лист
     if any(word in text_lower for word in ['чек-лист', 'перечень деталей', 'какие детали']):
         pump_type = detect_pump_type(user_text)
         if pump_type:
@@ -1227,57 +1234,7 @@ def handle_intelligent_input(message):
             bot.reply_to(message, "📌 Уточните тип насоса: центробежный, шестерёнчатый или поршневой")
         return
     
-    # ---- 4. ПРОВЕРКА ЗАЗОРОВ (С ДОПОЛНЕНИЕМ ПО ГОСТАМ) ----
-    if any(word in text_lower for word in ['проверь зазор', 'проверка зазора', 'какой зазор', 'норма зазора']):
-        clearances = extract_clearances_from_text(user_text)
-        if clearances:
-            responses = []
-            gost_responses = []
-            
-            for c in clearances:
-                if c['type'] != 'unknown':
-                    pump_type = detect_pump_type(user_text)
-                    if not pump_type:
-                        if "шестерен" in text_lower or "ротан" in text_lower:
-                            pump_type = "gear"
-                        elif "поршн" in text_lower or "плунж" in text_lower or "паровой" in text_lower:
-                            pump_type = "piston"
-                        else:
-                            pump_type = "centrifugal"
-                    
-                    # Проверка по ТУ (существующая)
-                    result = pump_db.check_clearance(pump_type, c['type'], c['value'])
-                    responses.append(f"🔹 {c['type']}: {c['value']} мм -> {result['message']}")
-                    
-                    # Проверка по ГОСТам (НОВОЕ!)
-                    if gost_checker:
-                        if c['type'] == 'bearing':
-                            gost_result = gost_checker.check_parameter("3325-85", "clearance", c['value'])
-                            if gost_result.get('status') != 'error':
-                                gost_responses.append(f"📌 ГОСТ 3325-85: {gost_result.get('message', '')}")
-                        elif c['type'] == 'axial' or c['type'] == 'radial':
-                            gost_result = gost_checker.check_parameter("24643-81", "runout", c['value'])
-                            if gost_result.get('status') != 'error':
-                                gost_responses.append(f"📌 ГОСТ 24643-81: {gost_result.get('message', '')}")
-            
-            if responses:
-                response = "📊 **Результаты проверки зазоров:**\n\n" + "\n".join(responses)
-                if gost_responses:
-                    response += "\n\n📋 **Дополнительно по ГОСТам:**\n" + "\n".join(gost_responses)
-                bot.reply_to(message, response, parse_mode='Markdown')
-                return
-        
-        bot.reply_to(message,
-            "🔧 Чтобы проверить зазор, напишите:\n"
-            "`проверь зазор центробежный радиальный 0.25`\n"
-            "`проверь зазор поршневой cylinder_piston 0.15`\n\n"
-            "Доступные зазоры для поршневых: cylinder_piston, ring_groove, ring_gap, crosshead, main_bearing, connecting_rod, seal_wear\n\n"
-            "📌 Также можно проверить по ГОСТам:\n"
-            "`проверь по ГОСТ 3325-85 зазор=0.15`"
-        )
-        return
-    
-    # ---- 5. ДЕФЕКТЫ ----
+    # Дефекты
     if any(word in text_lower for word in ['какие дефекты', 'частые дефекты', 'список дефектов', 'дефекты бывают']):
         if any(word in text_lower for word in ["двигател", "дизель", "мотор"]):
             defects = pump_db.get_common_defects("engine")
@@ -1299,10 +1256,10 @@ def handle_intelligent_input(message):
             bot.reply_to(message, response, parse_mode='Markdown')
             return
         else:
-            bot.reply_to(message, "📌 Уточните тип оборудования: насос (центробежный, шестерёнчатый, поршневой) или двигатель")
+            bot.reply_to(message, "📌 Уточните тип оборудования: насос или двигатель")
             return
     
-    # ---- 6. НОРМАТИВЫ ----
+    # Нормативы
     if any(word in text_lower for word in ['норматив', 'норма', 'ту', 'техническ']):
         response = "📐 **Нормативы зазоров по ТУ**\n\n"
         for pump_type in pump_db.get_pump_types():
@@ -1318,9 +1275,9 @@ def handle_intelligent_input(message):
         bot.reply_to(message, response, parse_mode='Markdown')
         return
     
-    # ---- 7. НЕПОНЯТНО ----
+    # Если ничего не подошло
     bot.reply_to(message,
-        "🤔 Я не понял запрос.\n\n"
+        "🤔 Я не совсем понял запрос.\n\n"
         "Что нужно?\n"
         "📄 Акт дефектации — 'сделай акт'\n"
         "📋 АВР — 'сделай АВР'\n"
@@ -1341,7 +1298,11 @@ if __name__ == '__main__':
     print("🤖 Бот-ассистент запущен!")
     print("📌 Типы оборудования в базе: насосы (центробежные, шестерёнчатые, поршневые), двигатели")
     print("📌 Доступные функции: ДА, АВР, проверка зазоров, дефекты, нормативы, чек-лист")
-    print("📌 Используется Яндекс.Алиса и база знаний для интеллектуального анализа")
+    
+    if alisa_router:
+        print("🧠 Алиса (YandexGPT) активна — все запросы проходят через неё!")
+    else:
+        print("⚠️ Алиса НЕ загружена — работаю в локальном режиме")
     
     # Статистика по ГОСТам
     if gost_checker:
