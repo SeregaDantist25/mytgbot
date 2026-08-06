@@ -1319,4 +1319,51 @@ if __name__ == '__main__':
     else:
         print("⚠️ ГОСТ чекер не загружен")
     
-    bot.infinity_polling()
+    import time
+
+def start_bot_with_retry():
+    max_retries = 5
+    retry_delay = 10
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"🔄 Попытка подключения {attempt + 1}/{max_retries}...")
+            bot.infinity_polling(timeout=60, long_polling_timeout=30)
+            break
+        except Exception as e:
+            print(f"⚠️ Ошибка: {e}")
+            if attempt < max_retries - 1:
+                print(f"⏳ Повтор через {retry_delay} секунд...")
+                time.sleep(retry_delay)
+                retry_delay += 5
+            else:
+                print("❌ Не удалось подключиться после всех попыток")
+                raise
+
+if __name__ == '__main__':
+    print("🤖 Бот-ассистент запущен!")
+    print("📌 Типы оборудования в базе: насосы (центробежные, шестерёнчатые, поршневые), двигатели")
+    print("📌 Доступные функции: ДА, АВР, проверка зазоров, дефекты, нормативы, чек-лист")
+    
+    if alisa_router:
+        print("🧠 Алиса (YandexGPT) активна — все запросы проходят через неё!")
+    else:
+        print("⚠️ Алиса НЕ загружена — работаю в локальном режиме")
+    
+    # Статистика по ГОСТам
+    if gost_checker:
+        gosts = gost_checker.get_all_gosts()
+        print(f"📚 Загружено ГОСТов: {len(gosts)}")
+        if gosts:
+            sections = {}
+            for gost_id, data in gosts.items():
+                section = data.get("section", "Общие")
+                sections[section] = sections.get(section, 0) + 1
+            print("📋 Разделы ГОСТов:")
+            for section, count in sections.items():
+                print(f"   • {section}: {count}")
+    else:
+        print("⚠️ ГОСТ чекер не загружен")
+    
+    # Запуск с повторными попытками
+    start_bot_with_retry()
