@@ -786,20 +786,9 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
         placeholders["conclusion"] = "Детали подлежат замене/восстановлению согласно указанному объёму работ."
     if show_notes:
         placeholders["notes"] = notes_text
+        placeholders["special_notes"] = notes_text
     
     doc = replace_placeholders(doc, placeholders)
-    
-    if equipment_type != "pump":
-        for i, paragraph in enumerate(doc.paragraphs):
-            if "Представитель Подрядчика" in paragraph.text or "Представитель заказчика" in paragraph.text:
-                p = doc.paragraphs[i].insert_paragraph_before()
-                run = p.add_run('Особые отметки:')
-                run.bold = True
-                p = doc.paragraphs[i].insert_paragraph_before()
-                p.text = notes_text
-                p = doc.paragraphs[i].insert_paragraph_before()
-                p.text = ""
-                break
     
     if equipment_type != "pump":
         for paragraph in doc.paragraphs:
