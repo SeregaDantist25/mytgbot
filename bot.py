@@ -50,6 +50,16 @@ except ImportError as e:
 except Exception as e:
     print(f"⚠️ Ошибка при загрузке Алисы: {e}")
 
+# Пытаемся загрузить создателя актов через Алису
+act_creator = None
+try:
+    from models.alisa_act_creator import act_creator as alisa_act_creator
+    print(f"✅ Создатель актов через Алису загружен!")
+except ImportError as e:
+    print(f"⚠️ Модуль alisa_act_creator не найден: {e}")
+except Exception as e:
+    print(f"⚠️ Ошибка при загрузке создателя актов: {e}")
+
 # ============================================================
 #  ЗАГРУЗКА ДАННЫХ ИЗ JSON
 # ============================================================
@@ -468,18 +478,7 @@ def generate_work_volume(defects, full_text, pump_type=None, equipment_type=None
         except Exception as e:
             print(f"⚠️ Ошибка при вызове Алисы: {e}")
     
-    # 2. Если есть оборудование и дефекты — пытаемся найти в старой базе знаний
-    if equipment_type and defects:
-        try:
-            from models.router import router
-            work = router._find_work_by_defect(defects[0])
-            if work:
-                print(f"✅ Найдено в старой базе знаний: {work}")
-                return work
-        except Exception as e:
-            print(f"⚠️ Ошибка при поиске в старой базе: {e}")
-    
-    # 3. Если ничего не помогло — базовый шаблон
+    # 2. Если ничего не помогло — базовый шаблон
     print("⚠️ Использую базовый шаблон")
     return generate_base_work_volume(defects)
 
@@ -1020,21 +1019,18 @@ def handle_message(message):
             bot.reply_to(message, "✅ Принято: другое оборудование")
             return
     
-    # ---- 1. БЫСТРЫЕ КОМАНДЫ (БЕЗ АЛИСЫ) ----
-    
-    # Создание акта
+    # ---- 1. АКТ ДЕФЕКТАЦИИ (ЧЕРЕЗ АЛИСУ) ----
     if any(word in text_lower for word in ['сделай акт', 'акт дефектации', 'оформи акт', 'составь акт']):
         handle_act_creation(message, user_text)
         return
     
-    # Создание АВР
+    # ---- 2. АВР ----
     if any(word in text_lower for word in ['авр', 'акт выполненных', 'сделай авр', 'оформи авр']):
         handle_avr_creation(message, user_text)
         return
     
-    # Проверка по ГОСТам (явная)
+    # ---- 3. ПРОВЕРКА ПО ГОСТАМ ----
     if any(word in text_lower for word in ['проверь по госту', 'по ГОСТ', 'по госту', 'гост']):
-        # Пытаемся распарсить ГОСТ
         gost_match = re.search(r'гост\s*([\d-]+)', text, re.IGNORECASE)
         if gost_match and gost_checker:
             gost_id = gost_match.group(1)
@@ -1054,33 +1050,27 @@ def handle_message(message):
                 bot.reply_to(message, response, parse_mode='Markdown')
                 return
     
-    # ---- 2. ВСЁ ОСТАЛЬНОЕ — ЧЕРЕЗ АЛИСУ ----
-    
+    # ---- 4. ВСЁ ОСТАЛЬНОЕ — ЧЕРЕЗ АЛИСУ ----
     if alisa_router:
-        # Получаем историю пользователя
         user_id = message.chat.id
         if user_id not in user_histories:
             user_histories[user_id] = []
         
         history = user_histories[user_id]
         
-        # Отправляем в Алису
         try:
             bot.send_chat_action(message.chat.id, 'typing')
             result = alisa_router.process_query(user_text, history)
             
-            # Сохраняем в историю
             history.append(f"Пользователь: {user_text}")
             history.append(f"Бот: {result.get('response', '')[:200]}")
             if len(history) > 10:
                 history = history[-10:]
             user_histories[user_id] = history
             
-            # Отправляем ответ
             if result.get('status') == 'ok':
                 bot.reply_to(message, result.get('response', 'Извините, не удалось получить ответ.'))
             else:
-                # Если Алиса вернула ошибку — пробуем локальный режим
                 bot.reply_to(message, "🤔 Попробую ответить без Алисы...")
                 handle_local_fallback(message, user_text)
                 
@@ -1089,7 +1079,6 @@ def handle_message(message):
             bot.reply_to(message, "⚠️ Произошла ошибка при обращении к Алисе. Отвечаю в локальном режиме.")
             handle_local_fallback(message, user_text)
     else:
-        # Алиса недоступна — локальный режим
         handle_local_fallback(message, user_text)
 
 
@@ -1098,53 +1087,53 @@ def handle_message(message):
 # ============================================================
 
 def handle_act_creation(message, user_text):
-    """Создание Акта дефектации"""
+    """Создание Акта дефектации через Алису"""
     try:
-        bot.send_message(message.chat.id, "🧠 Анализирую запрос для создания акта...")
+        bot.send_message(message.chat.id, "🧠 Анализирую запрос и генерирую акт через Алису...")
         
-        analysis = analyze_query_local(user_text)
+        # ---- ГЕНЕРАЦИЯ ЧЕРЕЗ АЛИСУ ----
+        if act_creator:
+            try:
+                act_data = act_creator.generate_act_data(user_text)
+                print(f"✅ Акт сгенерирован через Алису: {act_data}")
+            except Exception as e:
+                print(f"⚠️ Ошибка при вызове Алисы для акта: {e}")
+                act_data = None
+        else:
+            act_data = None
         
-        ship = analysis.get('ship')
-        equipment = analysis.get('equipment')
-        defects = analysis.get('defects', [])
-        pump_type = analysis.get('pump_type')
-        equipment_type = analysis.get('equipment_type')
-        clearances = analysis.get('clearances', [])
+        # ---- ЗАПАСНОЙ ВАРИАНТ — ЛОКАЛЬНЫЙ ----
+        if not act_data:
+            print("⚠️ Использую локальный парсер для акта")
+            analysis = analyze_query_local(user_text)
+            act_data = {
+                "ship": analysis.get('ship') or "Не указано",
+                "equipment": analysis.get('equipment') or "Не указано",
+                "repair_type": "Текущий ремонт",
+                "defects": analysis.get('defects', ["Не указано"]),
+                "work_volume": generate_work_volume(
+                    analysis.get('defects', []), 
+                    user_text, 
+                    analysis.get('pump_type'), 
+                    analysis.get('equipment_type')
+                ),
+                "conclusion": "Детали подлежат замене/восстановлению согласно указанному объёму работ."
+            }
         
-        if not equipment:
-            bot.reply_to(message, "🤔 Не удалось определить оборудование. Уточните: это насос, двигатель или другое оборудование?")
-            return
+        ship = act_data.get('ship', "Не указано")
+        equipment = act_data.get('equipment', "Не указано")
+        defects = act_data.get('defects', ["Не указано"])
+        work_volume = act_data.get('work_volume', generate_base_work_volume(["Не указано"]))
         
-        if not equipment_type or equipment_type == "other":
-            equip_type = detect_equipment_type(equipment)
-            if equip_type is None:
-                clarification_states[message.chat.id] = True
-                bot.reply_to(message, ask_for_clarification(equipment))
-                return
-            else:
-                equipment_type = equip_type
+        # Определяем тип оборудования для выбора таблицы
+        equipment_type = detect_equipment_type(equipment or "")
+        if equipment_type is None:
+            equipment_type = "pump"
         
-        for c in clearances:
-            defect_text = f"зазор {c['type']}: {c['value']} мм"
-            if defect_text not in defects:
-                defects.append(defect_text)
+        # Определяем тип насоса
+        pump_type = detect_pump_type(user_text)
         
-        if not defects:
-            for kw in ["износ", "течь", "коррози", "трещин", "выкрашиван", "задир", "деформац", "люфт", "зазор", "загрязнен", "неплотн", "протечк"]:
-                if kw in user_text.lower():
-                    defects.append(kw)
-            if not defects:
-                bot.reply_to(message, "🤔 Я не нашёл дефектов. Опишите дефекты подробнее.")
-                return
-        
-        if not equipment:
-            if "двигател" in user_text.lower() or "мотор" in user_text.lower() or "дизель" in user_text.lower():
-                equipment = "двигатель"
-            else:
-                pump_name = pump_db.get_pump_name(pump_type) if pump_type else ""
-                equipment = f"насос {pump_name}".strip() if pump_name else "насос"
-        
-        work_volume = generate_work_volume(defects, user_text, pump_type, equipment_type)
+        # Создаём документ
         file_stream = create_defect_document(ship, equipment, defects, work_volume, pump_type)
         
         bot.send_document(
@@ -1159,7 +1148,6 @@ def handle_act_creation(message, user_text):
         error_text = f"❌ Ошибка при создании акта:\n\n{str(e)}"
         bot.send_message(message.chat.id, error_text)
         print(traceback.format_exc())
-
 
 def handle_avr_creation(message, user_text):
     """Создание Акта выполненных работ"""
@@ -1180,7 +1168,6 @@ def handle_avr_creation(message, user_text):
         visible_file_name=f'АВР_{ship or "судна"}.docx'
     )
     bot.send_message(message.chat.id, "📄 Акт выполненных работ отправлен!")
-
 
 def handle_local_fallback(message, user_text):
     """Локальный режим работы (без Алисы)"""
@@ -1324,6 +1311,11 @@ if __name__ == '__main__':
         print("🧠 Алиса (YandexGPT) активна — все запросы проходят через неё!")
     else:
         print("⚠️ Алиса НЕ загружена — работаю в локальном режиме")
+    
+    if act_creator:
+        print("📄 Создатель актов через Алису загружен!")
+    else:
+        print("⚠️ Создатель актов через Алису НЕ загружен")
     
     # Статистика по ГОСТам
     if gost_checker:
