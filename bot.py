@@ -51,7 +51,7 @@ except Exception as e:
     print(f"⚠️ Ошибка при загрузке Алисы: {e}")
 
 # Пытаемся загрузить создателя актов через Алису
-act_creator = None
+alisa_act_creator = None
 try:
     from models.alisa_act_creator import act_creator as alisa_act_creator
     print(f"✅ Создатель актов через Алису загружен!")
@@ -153,22 +153,43 @@ def load_template(filename):
         raise FileNotFoundError(f"Шаблон {filename} не найден в {TEMPLATES_DIR}")
     return Document(template_path)
 
+def _merge_runs_with_tag(paragraph, tag):
+    """Склеивает runs параграфа в один, если тег разбит на несколько runs."""
+    full_text = paragraph.text
+    if tag not in full_text:
+        return
+    # Проверяем, есть ли тег хотя бы в одном run целиком
+    for run in paragraph.runs:
+        if tag in run.text:
+            return  # тег уже в одном run — нормализация не нужна
+    # Тег разбит — объединяем все runs в первый, остальные обнуляем
+    if not paragraph.runs:
+        return
+    first_run = paragraph.runs[0]
+    first_run.text = full_text
+    for run in paragraph.runs[1:]:
+        run.text = ""
+
+
 def replace_placeholders(doc, placeholders):
+    def _replace_in_paragraph(paragraph):
+        for key in placeholders:
+            tag = f"{{{{{key}}}}}"
+            if tag in paragraph.text:
+                _merge_runs_with_tag(paragraph, tag)
+                for run in paragraph.runs:
+                    if tag in run.text:
+                        run.text = run.text.replace(tag, str(placeholders[key]))
+
     for paragraph in doc.paragraphs:
-        for key, value in placeholders.items():
-            if f"{{{{{key}}}}}" in paragraph.text:
-                inline = paragraph.runs
-                for run in inline:
-                    if f"{{{{{key}}}}}" in run.text:
-                        run.text = run.text.replace(f"{{{{{key}}}}}", str(value))
-    
+        _replace_in_paragraph(paragraph)
+
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
-                    for key, value in placeholders.items():
-                        if f"{{{{{key}}}}}" in paragraph.text:
-                            paragraph.text = paragraph.text.replace(f"{{{{{key}}}}}", str(value))
+                    _replace_in_paragraph(paragraph)
+
     return doc
 
 def get_counter(doc_type):
@@ -644,7 +665,7 @@ def build_defect_table_engine(defects, work_volume):
 #  ФУНКЦИИ СОЗДАНИЯ ДОКУМЕНТОВ
 # ============================================================
 
-def create_defect_document(ship, equipment, defects, work_volume, pump_type=None):
+def create_defect_document(ship, equipment, defects, work_volume, pump_type=None, repair_type=None):
     """Создаёт акт дефектации с таблицей, подходящей под тип оборудования"""
     doc = load_template("defect_act_template.docx")
     
@@ -756,7 +777,7 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
         "date": date_str,
         "ship": ship or "Не указано",
         "equipment": equipment or "Не указано",
-        "work_object": "Текущий ремонт",
+        "work_object": repair_type or "Текущий ремонт",
         "purpose": "Определение технического состояния и объема ремонта",
         "basis": "План-график ремонта на 2026 год"
     }
@@ -1032,7 +1053,7 @@ def handle_message(message):
         gost_match = re.search(r'гост\s*([\d-]+)', user_text, re.IGNORECASE)
         if gost_match and gost_checker:
             gost_id = gost_match.group(1)
-            param_match = re.search(r'(\w+)\s*[=:]\s*([\d.]+)', text)
+            param_match = re.search(r'(\w+)\s*[=:]\s*([\d.]+)', user_text)
             if param_match:
                 param_name = param_match.group(1).strip()
                 value = float(param_match.group(2))
@@ -1090,9 +1111,9 @@ def handle_act_creation(message, user_text):
         bot.send_message(message.chat.id, "🧠 Анализирую запрос и генерирую акт через Алису...")
         
         # ---- ГЕНЕРАЦИЯ ЧЕРЕЗ АЛИСУ ----
-        if act_creator:
+        if alisa_act_creator:
             try:
-                act_data = act_creator.generate_act_data(user_text)
+                act_data = alisa_act_creator.generate_act_data(user_text)
                 print(f"✅ Акт сгенерирован через Алису: {act_data}")
             except Exception as e:
                 print(f"⚠️ Ошибка при вызове Алисы для акта: {e}")
@@ -1132,7 +1153,8 @@ def handle_act_creation(message, user_text):
         pump_type = detect_pump_type(user_text)
         
         # Создаём документ
-        file_stream = create_defect_document(ship, equipment, defects, work_volume, pump_type)
+        repair_type = act_data.get('repair_type')
+        file_stream = create_defect_document(ship, equipment, defects, work_volume, pump_type, repair_type)
         
         bot.send_document(
             message.chat.id, 
@@ -1310,7 +1332,7 @@ if __name__ == '__main__':
     else:
         print("⚠️ Алиса НЕ загружена — работаю в локальном режиме")
     
-    if act_creator:
+    if alisa_act_creator:
         print("📄 Создатель актов через Алису загружен!")
     else:
         print("⚠️ Создатель актов через Алису НЕ загружен")
