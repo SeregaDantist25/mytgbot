@@ -1,0 +1,352 @@
+{
+  "gost_id": "18863-89",
+  "title": "Насосы одновинтовые. Основные параметры",
+  "section": "Одновинтовые насосы",
+  "description": "Распространяется на одновинтовые насосы с подачей от 0,16 до 16,5 л/с (0,6-60 м³/ч) и давлением от 0,5 до 2,5 МПа, предназначенные для перекачивания чистых и загрязнённых жидкостей.",
+  "application_conditions": {
+    "fluid_types": "чистые и загрязнённые жидкости, в том числе не обладающие смазывающими свойствами",
+    "max_density": "1200 кг/м³",
+    "max_solid_content": "5% по массе",
+    "max_particle_size": "0.2 мм",
+    "max_particle_density": "2000 кг/м³",
+    "viscosity_range": "от 0.01 до 1000 Ст (от 10⁻⁶ до 10⁻¹ м²/с)",
+    "temperature_range": "от 273 до 353 К (от 0 до 80°C)",
+    "climate_modification": "по ГОСТ 15150",
+    "marine_modification": "ОМ (для судостроения) с автоматизацией класса А-1"
+  },
+  "type_designation": {
+    "format": "Н1В {подача}/{давление}",
+    "components": {
+      "Н1В": "исполнение насоса",
+      "числитель": "округлённое значение подачи в литрах на 100 оборотов винта",
+      "знаменатель": "давление в МПа × 10"
+    },
+    "example": "Н1В 6/10 — подача 1.4 л/с, давление 1.0 МПа",
+    "optional": "допускается добавление модификации, например Н1В 6/10-1"
+  },
+  "key_parameters": {
+    "current_models": {
+      "description": "Параметры выпускаемых насосов (таблица 1)",
+      "models": [
+        {
+          "type": "Н1В 1.6/5",
+          "flow": {"l_s": 0.60, "m3_h": 2.5},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5},
+          "speed": {"s": 48, "rpm": 2900},
+          "efficiency": 34.7,
+          "mass_kg": 45
+        },
+        {
+          "type": "Н1В 1.6/10",
+          "flow": {"l_s": 1.0, "m3_h": 10},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10},
+          "speed": {"s": 48, "rpm": 2900},
+          "efficiency": 35.0,
+          "mass_kg": 47
+        },
+        {
+          "type": "Н1В 6/5",
+          "flow": {"l_s": 1.40, "m3_h": 5.0},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5},
+          "speed": {"s": 48, "rpm": 2900},
+          "efficiency": 43.4,
+          "mass_kg": 45
+        },
+        {
+          "type": "Н1В 6/10",
+          "flow": {"l_s": 1.40, "m3_h": 5.0},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10},
+          "speed": {"s": 48, "rpm": 2900},
+          "efficiency": 51.4,
+          "mass_kg": 55
+        },
+        {
+          "type": "Н1В 12/5",
+          "flow": {"l_s": 2.80, "m3_h": 10.0},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5},
+          "speed": {"s": 24, "rpm": 1450},
+          "efficiency": 57.8,
+          "mass_kg": 65
+        },
+        {
+          "type": "Н1В 12/10",
+          "flow": {"l_s": 2.80, "m3_h": 10.0},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10},
+          "speed": {"s": 24, "rpm": 1450},
+          "efficiency": 56.6,
+          "mass_kg": 80
+        },
+        {
+          "type": "Н1В 20/5",
+          "flow": {"l_s": 4.45, "m3_h": 16.0},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5},
+          "speed": {"s": 24, "rpm": 1450},
+          "efficiency": 55.5,
+          "mass_kg": 96
+        },
+        {
+          "type": "Н1В 20/10",
+          "flow": {"l_s": 4.45, "m3_h": 16.0},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10},
+          "speed": {"s": 24, "rpm": 1450},
+          "efficiency": 55.5,
+          "mass_kg": 110
+        },
+        {
+          "type": "Н1В 50/5",
+          "flow": {"l_s": 6.95, "m3_h": 25.0},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5},
+          "speed": {"s": 16, "rpm": 980},
+          "efficiency": 56.0,
+          "mass_kg": 120
+        },
+        {
+          "type": "Н1В 50/10",
+          "flow": {"l_s": 6.95, "m3_h": 25.0},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10},
+          "speed": {"s": 16, "rpm": 980},
+          "efficiency": 56.9,
+          "mass_kg": 130
+        },
+        {
+          "type": "Н1В 80/5",
+          "flow": {"l_s": 8.90, "m3_h": 32.0},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5},
+          "speed": {"s": 16, "rpm": 980},
+          "efficiency": 44.4,
+          "mass_kg": 140
+        },
+        {
+          "type": "Н1В 100/5",
+          "flow": {"l_s": 11.10, "m3_h": 40.0},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5},
+          "speed": {"s": 12, "rpm": 730},
+          "efficiency": 45.5,
+          "mass_kg": 200
+        },
+        {
+          "type": "Н1В 100/10",
+          "flow": {"l_s": 11.10, "m3_h": 40.0},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10},
+          "speed": {"s": 12, "rpm": 730},
+          "efficiency": 51.6,
+          "mass_kg": 210
+        }
+      ]
+    },
+    "new_models": {
+      "description": "Параметры новых (модернизированных) насосов (таблица 2)",
+      "models": [
+        {
+          "type": "Н1В 0.4/5",
+          "flow": {"l_s": 0.16, "m3_h": 0.6},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5}
+        },
+        {
+          "type": "Н1В 0.4/10",
+          "flow": {"l_s": 0.16, "m3_h": 0.6},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10}
+        },
+        {
+          "type": "Н1В 0.4/16",
+          "flow": {"l_s": 0.16, "m3_h": 0.6},
+          "pressure": {"MPa": 1.6, "kgf_cm2": 16}
+        },
+        {
+          "type": "Н1В 0.4/25",
+          "flow": {"l_s": 0.16, "m3_h": 0.6},
+          "pressure": {"MPa": 2.5, "kgf_cm2": 25}
+        },
+        {
+          "type": "Н1В 1.6/5",
+          "flow": {"l_s": 0.60, "m3_h": 2.5},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5},
+          "speed": {"s": 48, "rpm": 2900},
+          "efficiency": 35,
+          "mass_kg": 13
+        },
+        {
+          "type": "Н1В 1.6/10",
+          "flow": {"l_s": 0.60, "m3_h": 2.5},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10},
+          "speed": {"s": 48, "rpm": 2900},
+          "efficiency": 50,
+          "mass_kg": 14
+        },
+        {
+          "type": "Н1В 1.6/16",
+          "flow": {"l_s": 0.60, "m3_h": 2.5},
+          "pressure": {"MPa": 1.6, "kgf_cm2": 16},
+          "speed": {"s": 48, "rpm": 2900},
+          "efficiency": 41,
+          "mass_kg": 18
+        },
+        {
+          "type": "Н1В 1.6/25",
+          "flow": {"l_s": 0.60, "m3_h": 2.5},
+          "pressure": {"MPa": 2.5, "kgf_cm2": 25}
+        },
+        {
+          "type": "Н1В 6/5",
+          "flow": {"l_s": 1.40, "m3_h": 5.0},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5},
+          "speed": {"s": 48, "rpm": 2900},
+          "efficiency": 45,
+          "mass_kg": 22
+        },
+        {
+          "type": "Н1В 6/10",
+          "flow": {"l_s": 1.40, "m3_h": 5.0},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10},
+          "speed": {"s": 48, "rpm": 2900},
+          "efficiency": 53,
+          "mass_kg": 26
+        },
+        {
+          "type": "Н1В 6/16",
+          "flow": {"l_s": 1.40, "m3_h": 5.0},
+          "pressure": {"MPa": 1.6, "kgf_cm2": 16},
+          "speed": {"s": 48, "rpm": 2900},
+          "efficiency": 50,
+          "mass_kg": 49
+        },
+        {
+          "type": "Н1В 6/25",
+          "flow": {"l_s": 1.40, "m3_h": 5.0},
+          "pressure": {"MPa": 2.5, "kgf_cm2": 25}
+        },
+        {
+          "type": "Н1В 12/5",
+          "flow": {"l_s": 2.80, "m3_h": 10.0},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5}
+        },
+        {
+          "type": "Н1В 12/10",
+          "flow": {"l_s": 2.80, "m3_h": 10.0},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10},
+          "speed": {"s": 24, "rpm": 1450},
+          "efficiency": 59,
+          "mass_kg": 39
+        },
+        {
+          "type": "Н1В 12/16",
+          "flow": {"l_s": 2.80, "m3_h": 10.0},
+          "pressure": {"MPa": 1.6, "kgf_cm2": 16},
+          "speed": {"s": 24, "rpm": 1450},
+          "efficiency": 56,
+          "mass_kg": 95
+        },
+        {
+          "type": "Н1В 12/25",
+          "flow": {"l_s": 2.80, "m3_h": 10.0},
+          "pressure": {"MPa": 2.5, "kgf_cm2": 25},
+          "speed": {"s": 24, "rpm": 1450},
+          "efficiency": 58,
+          "mass_kg": 105
+        },
+        {
+          "type": "Н1В 20/5",
+          "flow": {"l_s": 4.45, "m3_h": 16.0},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5}
+        },
+        {
+          "type": "Н1В 20/10",
+          "flow": {"l_s": 4.45, "m3_h": 16.0},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10},
+          "speed": {"s": 24, "rpm": 1450},
+          "efficiency": 58.5,
+          "mass_kg": 65
+        },
+        {
+          "type": "Н1В 20/16",
+          "flow": {"l_s": 4.45, "m3_h": 16.0},
+          "pressure": {"MPa": 1.6, "kgf_cm2": 16},
+          "speed": {"s": 24, "rpm": 1450},
+          "efficiency": 57,
+          "mass_kg": 100
+        },
+        {
+          "type": "Н1В 50/5",
+          "flow": {"l_s": 6.95, "m3_h": 25.0},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5},
+          "speed": {"s": 16, "rpm": 980}
+        },
+        {
+          "type": "Н1В 50/10",
+          "flow": {"l_s": 6.95, "m3_h": 25.0},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10},
+          "speed": {"s": 16, "rpm": 980}
+        },
+        {
+          "type": "Н1В 50/16",
+          "flow": {"l_s": 6.95, "m3_h": 25.0},
+          "pressure": {"MPa": 1.6, "kgf_cm2": 16},
+          "speed": {"s": 16, "rpm": 980},
+          "efficiency": 56,
+          "mass_kg": 120
+        },
+        {
+          "type": "Н1В 80/5",
+          "flow": {"l_s": 8.90, "m3_h": 32.0},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5},
+          "speed": {"s": 12, "rpm": 730},
+          "efficiency": 57,
+          "mass_kg": 125
+        },
+        {
+          "type": "Н1В 80/10",
+          "flow": {"l_s": 8.90, "m3_h": 32.0},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10},
+          "speed": {"s": 12, "rpm": 730},
+          "efficiency": 55,
+          "mass_kg": 150
+        },
+        {
+          "type": "Н1В 100/5",
+          "flow": {"l_s": 11.10, "m3_h": 40.0},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5}
+        },
+        {
+          "type": "Н1В 100/10",
+          "flow": {"l_s": 11.10, "m3_h": 40.0},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10},
+          "speed": {"s": 12, "rpm": 730},
+          "efficiency": 61,
+          "mass_kg": 160
+        },
+        {
+          "type": "Н1В 140/5",
+          "flow": {"l_s": 16.50, "m3_h": 60.0},
+          "pressure": {"MPa": 0.5, "kgf_cm2": 5}
+        },
+        {
+          "type": "Н1В 140/10",
+          "flow": {"l_s": 16.50, "m3_h": 60.0},
+          "pressure": {"MPa": 1.0, "kgf_cm2": 10}
+        }
+      ]
+    }
+  },
+  "additional_requirements": {
+    "test_conditions": {
+      "temperature": "293 К (20°C)",
+      "fluid": "вода",
+      "suction_height": "6 м (вакуумметрическая высота всасывания)"
+    },
+    "efficiency_tolerance": "производственный допуск на КПД минус 3%",
+    "pressure_series": [0.16, 0.2, 0.4, 0.5, 0.63, 1.0, 1.6, 2.5],
+    "max_inlet_pressure": "≤ 0.25 МПа (2.5 кгс/см²)",
+    "variable_speed": "допускается привод с регулируемой частотой вращения"
+  },
+  "check_algorithm": {
+    "purpose": "Алгоритм проверки соответствия одновинтового насоса требованиям",
+    "steps": [
+      "1. Определить типоразмер насоса (Н1В ...)",
+      "2. Проверить подачу по таблицам 1 или 2",
+      "3. Проверить давление (ряд: 0.5, 1.0, 1.6, 2.5 МПа)",
+      "4. Проверить КПД (допуск минус 3%)",
+      "5. Проверить условия эксплуатации (температура, вязкость, содержание твёрдых частиц)",
+      "6. При несоответствии выдать рекомендации"
+    ]
+  }
+}

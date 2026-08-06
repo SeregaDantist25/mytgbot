@@ -28,6 +28,18 @@ CHECKLISTS_FILE = os.path.join(DATA_DIR, "checklists.json")
 COUNTERS_FILE = os.path.join(DATA_DIR, "counters.json")
 
 # ============================================================
+#  ИМПОРТ ГОСТ ЧЕКЕРА
+# ============================================================
+
+try:
+    from gost_checker import GOSTChecker
+    gost_checker = GOSTChecker()
+    print(f"✅ ГОСТ чекер загружен. Доступно ГОСТов: {len(gost_checker.get_all_gosts())}")
+except Exception as e:
+    print(f"⚠️ Ошибка при загрузке ГОСТ чекера: {e}")
+    gost_checker = None
+
+# ============================================================
 #  ЗАГРУЗКА ДАННЫХ ИЗ JSON
 # ============================================================
 
@@ -185,13 +197,7 @@ def ask_for_clarification(equipment):
     return f"🔍 Я нашёл упоминание '{equipment}'. Уточните, это:\n1️⃣ Насос\n2️⃣ Двигатель\n3️⃣ Другое оборудование\n\nПросто напишите номер или название."
 
 # ============================================================
-#  АНАЛИЗ ЗАПРОСА С ПОМОЩЬЮ AI (GROQ) — УСТАРЕЛО, НО ОСТАВЛЯЕМ
-# ============================================================
-
-# (функции analyze_with_ai и т.д. удалены, они не используются)
-
-# ============================================================
-#  РАСШИРЕННЫЙ АНАЛИЗ ЗАПРОСОВ (С AI)
+#  РАСШИРЕННЫЙ АНАЛИЗ ЗАПРОСОВ
 # ============================================================
 
 def detect_ship(text):
@@ -457,7 +463,7 @@ def analyze_query(text):
     return result
 
 # ============================================================
-#  ГЕНЕРАЦИЯ ОБЪЁМА РАБОТ (ИСПРАВЛЕННАЯ)
+#  ГЕНЕРАЦИЯ ОБЪЁМА РАБОТ
 # ============================================================
 
 def generate_work_volume(defects, full_text, pump_type=None, equipment_type=None):
@@ -467,7 +473,6 @@ def generate_work_volume(defects, full_text, pump_type=None, equipment_type=None
     if equipment_type and defects:
         try:
             from models.router import router
-            # Ищем в базе знаний
             work = router._find_work_by_defect(defects[0])
             if work:
                 print(f"✅ Найдено в базе знаний: {work}")
@@ -890,15 +895,22 @@ def send_welcome(message):
         "• Создавать Акты дефектации (скажи 'сделай акт')\n"
         "• Создавать Акты выполненных работ (скажи 'сделай АВР')\n"
         "• Проверять зазоры по ТУ (скажи 'проверь зазор')\n"
+        "• Проверять параметры по ГОСТам (скажи 'проверь по ГОСТ')\n"
         "• Показывать частые дефекты (спроси 'какие дефекты')\n"
         "• Показывать чек-лист деталей (спроси 'чек-лист насоса')\n\n"
         "📌 Типы оборудования в базе:\n"
         "• Насосы: центробежные, шестерёнчатые, поршневые\n"
         "• Двигатели (MAN, Caterpillar и др.)\n\n"
+        "📌 Доступные команды:\n"
+        "• /gosts — список всех ГОСТов\n"
+        "• /search — поиск по ГОСТам\n"
+        "• /stats — статистика AI\n\n"
         "🧠 Я использую Яндекс.Алису и базу знаний для анализа запросов!\n\n"
         "📝 Примеры:\n"
         "• 'Судно Славянская, пожарный насос, повреждена крылатка. Сделай акт'\n"
-        "• 'Судно Аргака, главный двигатель MAN, износ поршневых колец. Сделай акт'"
+        "• 'Судно Аргака, главный двигатель MAN, износ поршневых колец. Сделай акт'\n"
+        "• 'проверь по ГОСТ 520-2011 диаметр=50'\n"
+        "• 'проверь по ГОСТ 3325-85 зазор=0.15'"
     )
 
 @bot.message_handler(commands=['stats'])
@@ -913,6 +925,75 @@ def show_stats(message):
         bot.reply_to(message, response, parse_mode='Markdown')
     except:
         bot.reply_to(message, "❌ Статистика недоступна")
+
+# ============================================================
+#  КОМАНДА /GOSTS — СПИСОК ВСЕХ ГОСТОВ
+# ============================================================
+
+@bot.message_handler(commands=['gosts'])
+def show_gosts(message):
+    """Показывает список всех доступных ГОСТов"""
+    if not gost_checker:
+        bot.reply_to(message, "❌ ГОСТ чекер не загружен. Проверьте файл gost_checker.py")
+        return
+    
+    gosts = gost_checker.get_all_gosts()
+    if not gosts:
+        bot.reply_to(message, "❌ База ГОСТов не загружена. Запустите merge_gosts.py")
+        return
+    
+    response = "📁 **Доступные ГОСТы:**\n\n"
+    
+    # Группируем по разделам
+    sections = {}
+    for gost_id, data in gosts.items():
+        section = data.get("section", "Общие")
+        if section not in sections:
+            sections[section] = []
+        sections[section].append((gost_id, data.get("title", "")[:50]))
+    
+    for section, items in sections.items():
+        response += f"**{section}** ({len(items)})\n"
+        for gost_id, title in items[:5]:
+            response += f"• {gost_id} — {title}...\n"
+        if len(items) > 5:
+            response += f"  _... и ещё {len(items)-5}_\n"
+        response += "\n"
+    
+    response += "💡 Используйте `проверь по ГОСТ {номер} {параметр}={значение}`\n"
+    response += "Пример: `проверь по ГОСТ 520-2011 диаметр=50`"
+    
+    bot.reply_to(message, response, parse_mode='Markdown')
+
+# ============================================================
+#  КОМАНДА /SEARCH — ПОИСК ПО ГОСТАМ
+# ============================================================
+
+@bot.message_handler(commands=['search'])
+def search_gosts(message):
+    """Поиск по ГОСТам"""
+    if not gost_checker:
+        bot.reply_to(message, "❌ ГОСТ чекер не загружен")
+        return
+    
+    query = message.text.replace('/search', '').strip()
+    if not query:
+        bot.reply_to(message, "📝 Введите поисковый запрос: `/search подшипник`")
+        return
+    
+    results = gost_checker.search(query)
+    if not results:
+        bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+        return
+    
+    response = f"📋 **Результаты поиска по '{query}':**\n\n"
+    for gost_id, data in list(results.items())[:10]:
+        response += f"• **{gost_id}** — {data.get('title', 'Без названия')[:60]}...\n"
+    
+    if len(results) > 10:
+        response += f"\n_... и ещё {len(results)-10} результатов_"
+    
+    bot.reply_to(message, response, parse_mode='Markdown')
 
 # ============================================================
 #  ГЛАВНЫЙ ОБРАБОТЧИК
@@ -943,7 +1024,7 @@ def handle_intelligent_input(message):
             bot.reply_to(message, "✅ Принято: другое оборудование")
             return
     
-    # ---- 1. АКТ ДЕФЕКТАЦИИ (ГЛАВНЫЙ ПРИОРИТЕТ) ----
+    # ---- 1. АКТ ДЕФЕКТАЦИИ ----
     wants_act = any(word in text_lower for word in [
         'акт', 'дефектовк', 'сделай акт', 'оформи', 'составь', 'создай',
         'двигател', 'мотор', 'дизель', 'гд', 'насос', 'помп'
@@ -1019,6 +1100,98 @@ def handle_intelligent_input(message):
             print(error_text)
         return
     
+    # ---- 1.5 ПРОВЕРКА ПО ГОСТАМ (НОВЫЙ БЛОК) ----
+    if any(word in text_lower for word in ['проверь по госту', 'гост', 'соответствие госту', 'по ГОСТ', 'по госту']):
+        if not gost_checker:
+            bot.reply_to(message, "❌ ГОСТ чекер не загружен. Проверьте файл gost_checker.py")
+            return
+        
+        # Ищем явное указание ГОСТа
+        gost_match = re.search(r'гост\s*([\d-]+)', text, re.IGNORECASE)
+        
+        if gost_match:
+            gost_id = gost_match.group(1)
+            param_match = re.search(r'(\w+)\s*[=:]\s*([\d.]+)', text)
+            if param_match:
+                param_name = param_match.group(1).strip()
+                value = float(param_match.group(2))
+                
+                result = gost_checker.check_parameter(gost_id, param_name, value)
+                
+                response = f"📊 **Проверка по ГОСТ {gost_id}**\n\n"
+                response += f"🔹 Параметр: {param_name}\n"
+                response += f"🔹 Значение: {value}\n\n"
+                response += f"{result.get('message', '')}"
+                if result.get('action'):
+                    response += f"\n\n🔧 **Рекомендация:** {result['action']}"
+                
+                bot.reply_to(message, response, parse_mode='Markdown')
+                return
+        
+        # Если не нашли явное указание, пробуем интеллектуальный поиск
+        param_match = re.search(r'(\w+)\s*[=:]\s*([\d.]+)', text_lower)
+        if param_match:
+            param_name = param_match.group(1)
+            value = float(param_match.group(2))
+            
+            # Подбираем ГОСТ по параметру
+            gost_mapping = {
+                "диаметр": "3325-85",
+                "diameter": "3325-85",
+                "d": "3325-85",
+                "зазор": "3325-85",
+                "clearance": "3325-85",
+                "ra": "2789-73",
+                "шероховатость": "2789-73",
+                "давление": "34252-2017",
+                "pressure": "34252-2017",
+                "подача": "18863-89",
+                "flow": "18863-89",
+                "допуск": "25346-2013",
+                "tolerance": "25346-2013",
+                "биение": "24643-81",
+                "runout": "24643-81",
+            }
+            
+            gost_id = None
+            for key, gid in gost_mapping.items():
+                if key in param_name.lower() or key in text_lower:
+                    gost_id = gid
+                    break
+            
+            if gost_id:
+                result = gost_checker.check_parameter(gost_id, param_name, value)
+                response = f"📊 **Проверка параметра по ГОСТ {gost_id}**\n\n"
+                response += f"🔹 Параметр: {param_name}\n"
+                response += f"🔹 Значение: {value}\n\n"
+                response += f"{result.get('message', '')}"
+                if result.get('action'):
+                    response += f"\n\n🔧 **Рекомендация:** {result['action']}"
+                bot.reply_to(message, response, parse_mode='Markdown')
+                return
+            else:
+                # Показываем список подходящих ГОСТов
+                gosts = gost_checker.search(param_name)
+                if gosts:
+                    response = f"📋 **Найдены ГОСТы с параметром '{param_name}':**\n\n"
+                    for gost_id, data in list(gosts.items())[:5]:
+                        response += f"• **{gost_id}** — {data.get('title', '')[:50]}...\n"
+                    response += "\n💡 Уточните запрос: `проверь по ГОСТ {номер} {параметр}={значение}`"
+                    bot.reply_to(message, response, parse_mode='Markdown')
+                    return
+        
+        # Если ничего не нашли
+        bot.reply_to(message,
+            "🔍 **Проверка по ГОСТам**\n\n"
+            "Используйте формат:\n"
+            "`проверь по ГОСТ 520-2011 диаметр=50`\n"
+            "`проверь по ГОСТ 3325-85 зазор=0.15`\n"
+            "`проверь по ГОСТ 2789-73 ra=1.6`\n\n"
+            "📋 Список всех ГОСТов: `/gosts`\n"
+            "🔎 Поиск по ГОСТам: `/search подшипник`"
+        )
+        return
+    
     # ---- 2. АВР ----
     if any(word in text_lower for word in ['авр', 'акт выполненных', 'выполненные работы']):
         ship = detect_ship(user_text)
@@ -1054,11 +1227,13 @@ def handle_intelligent_input(message):
             bot.reply_to(message, "📌 Уточните тип насоса: центробежный, шестерёнчатый или поршневой")
         return
     
-    # ---- 4. ПРОВЕРКА ЗАЗОРОВ ----
+    # ---- 4. ПРОВЕРКА ЗАЗОРОВ (С ДОПОЛНЕНИЕМ ПО ГОСТАМ) ----
     if any(word in text_lower for word in ['проверь зазор', 'проверка зазора', 'какой зазор', 'норма зазора']):
         clearances = extract_clearances_from_text(user_text)
         if clearances:
             responses = []
+            gost_responses = []
+            
             for c in clearances:
                 if c['type'] != 'unknown':
                     pump_type = detect_pump_type(user_text)
@@ -1069,10 +1244,26 @@ def handle_intelligent_input(message):
                             pump_type = "piston"
                         else:
                             pump_type = "centrifugal"
+                    
+                    # Проверка по ТУ (существующая)
                     result = pump_db.check_clearance(pump_type, c['type'], c['value'])
                     responses.append(f"🔹 {c['type']}: {c['value']} мм -> {result['message']}")
+                    
+                    # Проверка по ГОСТам (НОВОЕ!)
+                    if gost_checker:
+                        if c['type'] == 'bearing':
+                            gost_result = gost_checker.check_parameter("3325-85", "clearance", c['value'])
+                            if gost_result.get('status') != 'error':
+                                gost_responses.append(f"📌 ГОСТ 3325-85: {gost_result.get('message', '')}")
+                        elif c['type'] == 'axial' or c['type'] == 'radial':
+                            gost_result = gost_checker.check_parameter("24643-81", "runout", c['value'])
+                            if gost_result.get('status') != 'error':
+                                gost_responses.append(f"📌 ГОСТ 24643-81: {gost_result.get('message', '')}")
+            
             if responses:
                 response = "📊 **Результаты проверки зазоров:**\n\n" + "\n".join(responses)
+                if gost_responses:
+                    response += "\n\n📋 **Дополнительно по ГОСТам:**\n" + "\n".join(gost_responses)
                 bot.reply_to(message, response, parse_mode='Markdown')
                 return
         
@@ -1080,7 +1271,9 @@ def handle_intelligent_input(message):
             "🔧 Чтобы проверить зазор, напишите:\n"
             "`проверь зазор центробежный радиальный 0.25`\n"
             "`проверь зазор поршневой cylinder_piston 0.15`\n\n"
-            "Доступные зазоры для поршневых: cylinder_piston, ring_groove, ring_gap, crosshead, main_bearing, connecting_rod, seal_wear"
+            "Доступные зазоры для поршневых: cylinder_piston, ring_groove, ring_gap, crosshead, main_bearing, connecting_rod, seal_wear\n\n"
+            "📌 Также можно проверить по ГОСТам:\n"
+            "`проверь по ГОСТ 3325-85 зазор=0.15`"
         )
         return
     
@@ -1134,7 +1327,10 @@ def handle_intelligent_input(message):
         "🔧 Проверить зазор — 'проверь зазор'\n"
         "📋 Дефекты — 'какие дефекты у поршневого насоса'\n"
         "📐 Нормативы — 'нормативы зазоров'\n"
-        "📋 Чек-лист — 'чек-лист центробежного насоса'"
+        "📋 Чек-лист — 'чек-лист центробежного насоса'\n"
+        "📁 Проверка по ГОСТам — 'проверь по ГОСТ 520-2011 диаметр=50'\n"
+        "📋 Список ГОСТов — '/gosts'\n"
+        "🔎 Поиск по ГОСТам — '/search подшипник'"
     )
 
 # ============================================================
@@ -1146,4 +1342,20 @@ if __name__ == '__main__':
     print("📌 Типы оборудования в базе: насосы (центробежные, шестерёнчатые, поршневые), двигатели")
     print("📌 Доступные функции: ДА, АВР, проверка зазоров, дефекты, нормативы, чек-лист")
     print("📌 Используется Яндекс.Алиса и база знаний для интеллектуального анализа")
+    
+    # Статистика по ГОСТам
+    if gost_checker:
+        gosts = gost_checker.get_all_gosts()
+        print(f"📚 Загружено ГОСТов: {len(gosts)}")
+        if gosts:
+            sections = {}
+            for gost_id, data in gosts.items():
+                section = data.get("section", "Общие")
+                sections[section] = sections.get(section, 0) + 1
+            print("📋 Разделы ГОСТов:")
+            for section, count in sections.items():
+                print(f"   • {section}: {count}")
+    else:
+        print("⚠️ ГОСТ чекер не загружен")
+    
     bot.infinity_polling()
