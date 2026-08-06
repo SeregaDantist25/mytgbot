@@ -10,6 +10,7 @@ from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from io import BytesIO
 import re
 import json
+import time
 
 # --- Настройки ---
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -645,7 +646,7 @@ def build_defect_table_engine(defects, work_volume):
 # ============================================================
 
 def create_defect_document(ship, equipment, defects, work_volume, pump_type=None):
-    """Созда center акта дефектации с таблицей, подходящей под тип оборудования"""
+    """Создаёт акт дефектации с таблицей, подходящей под тип оборудования"""
     doc = load_template("defect_act_template.docx")
     
     number = get_counter("da")
@@ -1291,37 +1292,11 @@ def handle_local_fallback(message, user_text):
     )
 
 # ============================================================
-#  ЗАПУСК
+#  ЗАПУСК С ПОВТОРНЫМИ ПОПЫТКАМИ
 # ============================================================
 
-if __name__ == '__main__':
-    print("🤖 Бот-ассистент запущен!")
-    print("📌 Типы оборудования в базе: насосы (центробежные, шестерёнчатые, поршневые), двигатели")
-    print("📌 Доступные функции: ДА, АВР, проверка зазоров, дефекты, нормативы, чек-лист")
-    
-    if alisa_router:
-        print("🧠 Алиса (YandexGPT) активна — все запросы проходят через неё!")
-    else:
-        print("⚠️ Алиса НЕ загружена — работаю в локальном режиме")
-    
-    # Статистика по ГОСТам
-    if gost_checker:
-        gosts = gost_checker.get_all_gosts()
-        print(f"📚 Загружено ГОСТов: {len(gosts)}")
-        if gosts:
-            sections = {}
-            for gost_id, data in gosts.items():
-                section = data.get("section", "Общие")
-                sections[section] = sections.get(section, 0) + 1
-            print("📋 Разделы ГОСТов:")
-            for section, count in sections.items():
-                print(f"   • {section}: {count}")
-    else:
-        print("⚠️ ГОСТ чекер не загружен")
-    
-    import time
-
 def start_bot_with_retry():
+    """Запуск бота с повторными попытками подключения"""
     max_retries = 5
     retry_delay = 10
     

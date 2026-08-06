@@ -107,6 +107,8 @@ class AIRouter:
     def process_query(self, user_text: str, history: List[str] = None) -> Dict:
         """Обработка запроса через Алису"""
         self.stats["calls"] += 1
+
+	print(f"🧠 ai_router.process_query: {user_text[:50]}...")
         
         # 1. Проверяем, не является ли запрос прямой командой (для быстрых ответов)
         quick_result = self._check_quick_commands(user_text)
