@@ -1,172 +1,84 @@
 # models/ai_router.py
 import os
-import json
 import httpx
-import re
-from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, List, Optional
 
 class AIRouter:
     def __init__(self):
         self.api_key = os.environ.get('YANDEX_API_KEY')
         self.folder_id = os.environ.get('YANDEX_FOLDER_ID')
-        self.model = "yandexgpt"
-        
-        # Загружаем базу знаний
-        self.gost_data = self._load_gosts()
-        self.pump_data = self._load_pumps()
-        
-        # Статистика
         self.stats = {"calls": 0, "errors": 0}
-    
-    def _load_gosts(self) -> Dict:
-        """Загрузка базы ГОСТов"""
-        try:
-            with open("gost_data.json", 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return data.get("gosts", {})
-        except:
-            return {}
-    
-    def _load_pumps(self) -> Dict:
-        """Загрузка базы насосов"""
-        try:
-            with open("data/checklists.json", 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return {}
-    
-    def _build_context(self) -> str:
-        """Сборка контекста для Алисы (вся база знаний)"""
-        context = []
-        
-        # 1. Информация о ГОСТах
-        context.append("📋 ДОСТУПНЫЕ ГОСТЫ ДЛЯ ПРОВЕРКИ:")
-        for gost_id, data in list(self.gost_data.items())[:20]:
-            title = data.get("title", "")[:60]
-            context.append(f"• {gost_id}: {title}")
-            params = data.get("parameters", {})
-            if params:
-                param_list = ", ".join(list(params.keys())[:5])
-                context.append(f"  Параметры: {param_list}")
-        context.append("")
-        
-        # 2. Информация о насосах
-        context.append("🔧 ТИПЫ НАСОСОВ И ИХ ЗАЗОРЫ:")
-        for pump_type, data in self.pump_data.items():
-            name = data.get("name", pump_type)
-            context.append(f"• {name}:")
-            clearances = data.get("clearances", {})
-            for ct, values in clearances.items():
-                min_val = values.get("min", 0)
-                max_val = values.get("max", 0)
-                unit = values.get("unit", "мм")
-                context.append(f"  - {ct}: {min_val}-{max_val} {unit}")
-        context.append("")
-        
-        # 3. Информация о функциях бота
-        context.append("⚙️ ДОСТУПНЫЕ ФУНКЦИИ:")
-        context.append("• Создать Акт дефектации — скажи 'сделай акт' или опиши дефекты")
-        context.append("• Создать Акт выполненных работ — скажи 'сделай АВР'")
-        context.append("• Проверить зазор — скажи 'проверь зазор'")
-        context.append("• Проверить по ГОСТу — скажи 'проверь по ГОСТ {номер} {параметр}={значение}'")
-        context.append("• Показать ГОСТы — скажи 'покажи ГОСТы'")
-        context.append("• Поиск по ГОСТам — скажи 'найди ГОСТ по {запрос}'")
-        
-        return "\n".join(context)
-    
-    def _build_prompt(self, user_text: str, history: List[str] = None) -> str:
-        """Сборка полного промпта для Алисы"""
-        context = self._build_context()
-        
-        history_text = ""
-        if history:
-            history_text = "ИСТОРИЯ ДИАЛОГА:\n" + "\n".join(history[-5:]) + "\n"
-        
-        prompt = f"""Ты — инженерный ассистент для судоремонта. Твоя задача — помогать пользователю с ремонтом судового оборудования.
-
-Твои ОБЯЗАННОСТИ:
-1. Отвечать на ВСЕ вопросы пользователя, даже если они не связаны напрямую с судоремонтом
-2. Использовать базу знаний для проверки параметров по ГОСТам
-3. Создавать документы (Акты дефектации, АВР) по запросу
-4. Проверять зазоры и параметры по ТУ
-5. Давать рекомендации по ремонту
-
-{context}
-
-{history_text}
-
-ПОЛЬЗОВАТЕЛЬ: {user_text}
-
-ОТВЕТЬ на вопрос пользователя. Если нужно создать документ — скажи об этом и спроси недостающие данные. Если нужно проверить параметр — сделай это по ГОСТам. Если пользователь просто спрашивает — ответь дружелюбно и профессионально.
-
-Твой ответ:"""
-        
-        return prompt
+        print(f"🔧 AIRouter инициализирован. API Key: {'есть' if self.api_key else 'НЕТ'}")
     
     def process_query(self, user_text: str, history: List[str] = None) -> Dict:
         """Обработка запроса через Алису"""
         self.stats["calls"] += 1
-
-	print(f"🧠 ai_router.process_query: {user_text[:50]}...")
         
-        # 1. Проверяем, не является ли запрос прямой командой (для быстрых ответов)
-        quick_result = self._check_quick_commands(user_text)
-        if quick_result:
-            return quick_result
-        
-        # 2. Отправляем запрос в Алису
-        try:
-            response = self._call_alisa(user_text, history)
-            return {
-                "status": "ok",
-                "response": response,
-                "source": "alisa",
-                "calls": self.stats["calls"]
-            }
-        except Exception as e:
+        # Проверяем наличие ключей
+        if not self.api_key or not self.folder_id:
             self.stats["errors"] += 1
             return {
                 "status": "error",
-                "response": f"Извините, произошла ошибка: {str(e)}. Попробуйте переформулировать запрос.",
-                "source": "error",
-                "calls": self.stats["calls"]
+                "response": "⚠️ Алиса не настроена. Добавьте YANDEX_API_KEY и YANDEX_FOLDER_ID в переменные окружения.",
+                "source": "error"
+            }
+        
+        try:
+            prompt = self._build_prompt(user_text, history)
+            response = self._call_yandex_gpt(prompt)
+            
+            if response:
+                return {
+                    "status": "ok",
+                    "response": response,
+                    "source": "alisa"
+                }
+            else:
+                self.stats["errors"] += 1
+                return {
+                    "status": "error",
+                    "response": "Извините, Алиса не смогла сформировать ответ. Попробуйте переформулировать запрос.",
+                    "source": "error"
+                }
+                
+        except Exception as e:
+            self.stats["errors"] += 1
+            print(f"⚠️ Ошибка при вызове Алисы: {e}")
+            return {
+                "status": "error",
+                "response": f"⚠️ Произошла ошибка: {str(e)[:100]}",
+                "source": "error"
             }
     
-    def _check_quick_commands(self, text: str) -> Optional[Dict]:
-        """Быстрая проверка команд без вызова Алисы"""
-        text_lower = text.lower()
+    def _build_prompt(self, user_text: str, history: List[str] = None) -> str:
+        """Сборка промпта для Алисы"""
+        prompt = """Ты — инженерный ассистент для судоремонта. Ты работаешь в компании ООО «Новое время» (Находка).
+
+Твои ОБЯЗАННОСТИ:
+1. Помогать с ремонтом судового оборудования
+2. Проверять параметры по ГОСТам (у тебя есть 23 ГОСТа)
+3. Создавать Акты дефектации и АВР
+4. Проверять зазоры по ТУ
+5. Давать рекомендации по ремонту
+
+ПРАВИЛА ОТВЕТОВ:
+- Отвечай кратко, по делу, профессионально
+- Если запрос не по теме судоремонта — вежливо объясни, что ты специализируешься на судоремонте
+- Не придумывай несуществующие ГОСТы и параметры
+- Если не знаешь точного ответа — скажи об этом и предложи уточнить запрос
+
+"""
         
-        # Команда для создания акта
-        if any(word in text_lower for word in ['сделай акт', 'акт дефектации', 'оформи акт']):
-            return {
-                "status": "action",
-                "action": "create_act",
-                "response": "📄 Для создания Акта дефектации опишите:\n- Судно\n- Оборудование\n- Дефекты\n\nПример: 'Судно Аргака, насос центробежный, износ подшипников'"
-            }
+        if history:
+            prompt += "\nИСТОРИЯ ДИАЛОГА:\n"
+            for msg in history[-5:]:
+                prompt += f"{msg}\n"
         
-        # Команда для АВР
-        if any(word in text_lower for word in ['сделай авр', 'акт выполненных', 'оформи авр']):
-            return {
-                "status": "action",
-                "action": "create_avr",
-                "response": "📋 Для создания Акта выполненных работ опишите:\n- Выполненные работы\n- Количество и единицы измерения\n\nПример: 'АВР: замена уголков 44 шт, болтов 194 шт'"
-            }
-        
-        # Команда для проверки по ГОСТу
-        gost_match = re.search(r'проверь по ГОСТ\s*([\d-]+)', text_lower)
-        if gost_match:
-            return None  # Отправляем в Алису, она разберётся
-        
-        return None
+        prompt += f"\nПОЛЬЗОВАТЕЛЬ: {user_text}\n\nОТВЕТ:"
+        return prompt
     
-    def _call_alisa(self, user_text: str, history: List[str] = None) -> str:
-        """Вызов YandexGPT"""
-        if not self.api_key:
-            return self._fallback_response(user_text)
-        
-        prompt = self._build_prompt(user_text, history)
-        
+    def _call_yandex_gpt(self, prompt: str) -> Optional[str]:
+        """Вызов YandexGPT API"""
         try:
             with httpx.Client(timeout=30.0) as client:
                 response = client.post(
@@ -180,12 +92,12 @@ class AIRouter:
                         "completionOptions": {
                             "stream": False,
                             "temperature": 0.3,
-                            "maxTokens": 2000
+                            "maxTokens": 1500
                         },
                         "messages": [
                             {
                                 "role": "system",
-                                "text": "Ты — инженерный ассистент для судоремонта. Отвечай дружелюбно и профессионально."
+                                "text": "Ты инженерный ассистент для судоремонта. Отвечай профессионально и по делу."
                             },
                             {
                                 "role": "user",
@@ -197,59 +109,47 @@ class AIRouter:
                 
                 if response.status_code == 200:
                     result = response.json()
-                    return result.get("result", {}).get("alternatives", [{}])[0].get("message", {}).get("text", "Извините, не удалось получить ответ.")
+                    answer = result.get("result", {}).get("alternatives", [{}])[0].get("message", {}).get("text", "")
+                    return answer
                 else:
-                    return self._fallback_response(user_text)
+                    print(f"⚠️ Ошибка YandexGPT: {response.status_code} - {response.text[:200]}")
+                    return None
                     
+        except httpx.TimeoutException:
+            print("⚠️ Таймаут при вызове YandexGPT")
+            return None
         except Exception as e:
-            print(f"⚠️ Ошибка при вызове Алисы: {e}")
-            return self._fallback_response(user_text)
-    
-    def _fallback_response(self, user_text: str) -> str:
-        """Запасной ответ, если Алиса недоступна"""
-        text_lower = user_text.lower()
-        
-        # Проверяем зазоры локально
-        if "проверь зазор" in text_lower:
-            from bot import extract_clearances_from_text, detect_pump_type, pump_db
-            clearances = extract_clearances_from_text(user_text)
-            if clearances:
-                responses = []
-                for c in clearances:
-                    pump_type = detect_pump_type(user_text) or "centrifugal"
-                    result = pump_db.check_clearance(pump_type, c['type'], c['value'])
-                    responses.append(f"• {c['type']}: {c['value']} мм → {result['message']}")
-                return "📊 Результаты проверки зазоров:\n\n" + "\n".join(responses)
-        
-        # Проверяем ГОСТы локально
-        if "гост" in text_lower or "проверь по" in text_lower:
-            return self._local_gost_check(user_text)
-        
-        return "🤔 Я не совсем понял запрос. Могу:\n- Создать Акт дефектации ('сделай акт')\n- Создать АВР ('сделай АВР')\n- Проверить зазор ('проверь зазор')\n- Проверить по ГОСТу ('проверь по ГОСТ 520-2011 диаметр=50')\n\nИли просто задайте вопрос на русском языке."
-    
-    def _local_gost_check(self, text: str) -> str:
-        """Локальная проверка по ГОСТам"""
-        try:
-            from gost_checker import GOSTChecker
-            checker = GOSTChecker()
-            
-            gost_match = re.search(r'гост\s*([\d-]+)', text, re.IGNORECASE)
-            if gost_match:
-                gost_id = gost_match.group(1)
-                param_match = re.search(r'(\w+)\s*[=:]\s*([\d.]+)', text)
-                if param_match:
-                    param_name = param_match.group(1)
-                    value = float(param_match.group(2))
-                    result = checker.check_parameter(gost_id, param_name, value)
-                    return f"📊 Проверка по ГОСТ {gost_id}:\n\n{result.get('message', '')}"
-            
-            return "Не удалось распознать запрос для проверки по ГОСТу."
-        except:
-            return "Ошибка при проверке по ГОСТам."
+            print(f"⚠️ Ошибка при вызове YandexGPT: {e}")
+            return None
     
     def get_stats(self) -> Dict:
         """Статистика использования"""
         return self.stats
+    
+    def generate_work_volume(self, defects: List[str], equipment_type: str = None, pump_type: str = None) -> Optional[str]:
+        """Генерация объёма работ через Алису"""
+        try:
+            prompt = f"""Составь подробный объём работ для ремонта судового оборудования.
+
+Тип оборудования: {equipment_type or 'не указан'}
+Тип насоса: {pump_type or 'не указан'}
+Дефекты: {', '.join(defects) if defects else 'не указаны'}
+
+Обязательно включи:
+1. Демонтаж узла
+2. Разборку и дефектацию
+3. Замену или восстановление деталей
+4. Сборку с проверкой зазоров
+5. Монтаж
+6. Предъявление лицу сдающему
+
+Отвечай в виде нумерованного списка, коротко и по делу."""
+
+            result = self._call_yandex_gpt(prompt)
+            return result
+        except Exception as e:
+            print(f"⚠️ Ошибка генерации объёма работ: {e}")
+            return None
 
 # Создаём глобальный экземпляр
 router = AIRouter()
