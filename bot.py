@@ -554,6 +554,20 @@ DEFECT_MAP = {
     "гайк": "6.3",
 }
 
+DEFAULT_NO_DEFECT_TEXT = "Визуальный осмотр. Дефектов не обнаружено."
+DEFAULT_NO_DEFECT_WORK = "Мыть, чистить. Годен к дальнейшей эксплуатации."
+
+# Карта "ключевое слово в дефекте" -> "короткое действие"
+ACTION_MAP = {
+    "эксплуатационный износ": "Замена.",
+    "износ": "Замена.",
+    "коррози": "Чистка УШМ, грунтовка. Пригодна к дальнейшей эксплуатации.",
+    "грязев": "Мыть, чистить. Годен к дальнейшей эксплуатации.",
+    "окисление": "Мыть, чистить. Годен к дальнейшей эксплуатации.",
+    "трещин": "Замена.",
+    "течь": "Замена уплотнений, проверка герметичности.",
+}
+
 def build_defect_table_pump(pump_type, defects, work_volume):
     """Строит таблицу для насосов (7 колонок)"""
     rows = [
@@ -616,7 +630,17 @@ def build_defect_table_pump(pump_type, defects, work_volume):
                     break
     
     for row in rows:
-        row["work"] = work_volume
+        if not row["defect"]:
+            row["defect"] = DEFAULT_NO_DEFECT_TEXT
+            row["work"] = DEFAULT_NO_DEFECT_WORK
+        else:
+            defect_lower = row["defect"].lower()
+            matched = None
+            for keyword, action in ACTION_MAP.items():
+                if keyword in defect_lower:
+                    matched = action
+                    break
+            row["work"] = matched or work_volume
     
     return rows
 
@@ -665,7 +689,7 @@ def build_defect_table_engine(defects, work_volume):
 #  ФУНКЦИИ СОЗДАНИЯ ДОКУМЕНТОВ
 # ============================================================
 
-def create_defect_document(ship, equipment, defects, work_volume, pump_type=None, repair_type=None):
+def create_defect_document(ship, equipment, defects, work_volume, pump_type=None, repair_type=None, purpose=None, basis=None):
     """Создаёт акт дефектации с таблицей, подходящей под тип оборудования"""
     doc = load_template("defect_act_template.docx")
     
@@ -696,6 +720,7 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
         show_basis = True
         show_conclusion = True
         show_notes = False
+        notes_text = ""
     else:
         rows_data = build_defect_table_engine(defects, work_volume)
         cols = 6
@@ -778,15 +803,13 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
         "ship": ship or "Не указано",
         "equipment": equipment or "Не указано",
         "work_object": repair_type or "Текущий ремонт",
-        "purpose": "Определение технического состояния и объема ремонта",
-        "basis": "План-график ремонта на 2026 год"
+        "purpose": purpose or "Определение технического состояния и объема ремонта",
+        "basis": basis or f"План-график ремонта на {datetime.now().year} год"
     }
     
     if show_conclusion:
         placeholders["conclusion"] = "Детали подлежат замене/восстановлению согласно указанному объёму работ."
-    if show_notes:
-        placeholders["notes"] = notes_text
-        placeholders["special_notes"] = notes_text
+    placeholders["special_notes"] = notes_text if show_notes else ""
     
     doc = replace_placeholders(doc, placeholders)
     
@@ -1003,6 +1026,9 @@ clarification_states = {}
 # История диалогов для контекста (для Алисы)
 user_histories = {}
 
+# Ожидающие акты дефектации (ждут уточнения основания)
+pending_acts = {}
+
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     user_text = message.text
@@ -1011,6 +1037,32 @@ def handle_message(message):
     if user_text.startswith('/'):
         return
     
+    # --- ОБРАБОТКА УТОЧНЕНИЯ ОСНОВАНИЯ АКТА ---
+    if message.chat.id in pending_acts and pending_acts[message.chat.id]:
+        pending = pending_acts[message.chat.id]
+        basis = user_text.strip()
+        if not basis:
+            bot.reply_to(message, "Пожалуйста, укажите основание для акта.")
+            return
+        del pending_acts[message.chat.id]
+        try:
+            file_stream = create_defect_document(
+                pending["ship"], pending["equipment"], pending["defects"],
+                pending["work_volume"], pending["pump_type"], pending["repair_type"],
+                purpose=pending["purpose"], basis=basis
+            )
+            bot.send_document(
+                message.chat.id,
+                file_stream,
+                visible_file_name=f'Акт_дефектации_{pending["ship"] or "судна"}.docx'
+            )
+            bot.send_message(message.chat.id, "📄 Акт дефектации в Word отправлен!")
+        except Exception as e:
+            import traceback
+            print(traceback.format_exc())
+            bot.send_message(message.chat.id, f"❌ Ошибка при создании акта:\n\n{str(e)}")
+        return
+
     # --- ОБРАБОТКА УТОЧНЕНИЙ ---
     if message.chat.id in clarification_states and clarification_states[message.chat.id]:
         equipment_type = text_lower
@@ -1132,7 +1184,22 @@ def handle_act_creation(message, user_text):
         equipment = act_data.get('equipment', "Не указано")
         defects = act_data.get('defects', ["Не указано"])
         work_volume = act_data.get('work_volume', generate_base_work_volume(["Не указано"]))
-        
+
+        if not ship or ship == "Не указано":
+            bot.send_message(
+                message.chat.id,
+                "🚫 Не удалось определить судно. Укажите его явно, например:\n"
+                "«Акт дефектации для теплохода «Восток», насос ЭСН-11, износ подшипников»"
+            )
+            return
+
+        if not equipment or equipment == "Не указано":
+            bot.send_message(
+                message.chat.id,
+                "🚫 Не удалось определить оборудование. Укажите тип и модель явно."
+            )
+            return
+
         # Определяем тип оборудования для выбора таблицы
         equipment_type = detect_equipment_type(equipment or "")
         if equipment_type is None:
@@ -1141,16 +1208,22 @@ def handle_act_creation(message, user_text):
         # Определяем тип насоса
         pump_type = detect_pump_type(user_text)
         
-        # Создаём документ
+        # Сохраняем данные акта и уточняем основание
         repair_type = act_data.get('repair_type')
-        file_stream = create_defect_document(ship, equipment, defects, work_volume, pump_type, repair_type)
-        
-        bot.send_document(
-            message.chat.id, 
-            file_stream, 
-            visible_file_name=f'Акт_дефектации_{ship or "судна"}.docx'
+        pending_acts[message.chat.id] = {
+            "ship": ship,
+            "equipment": equipment,
+            "defects": defects,
+            "work_volume": work_volume,
+            "pump_type": pump_type,
+            "repair_type": repair_type,
+            "purpose": "Определение технического состояния и объема ремонта",
+        }
+        bot.send_message(
+            message.chat.id,
+            "📋 Данные акта определены. Укажите основание для акта, например:\n"
+            "«План-график ремонта на 2026 год» или «Заявка капитана»"
         )
-        bot.send_message(message.chat.id, "📄 Акт дефектации в Word отправлен!")
         
     except Exception as e:
         import traceback
