@@ -13,10 +13,13 @@ import json
 import time
 import sqlite3
 import threading
+import db
 
 # --- Настройки ---
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
+# Секретный код инженера-технолога (задаётся через переменную окружения ENGINEER_CODE)
+ENGINEER_CODE = os.environ.get('ENGINEER_CODE')
 
 if not BOT_TOKEN:
     raise ValueError("Переменная TELEGRAM_BOT_TOKEN не найдена!")
@@ -1128,6 +1131,118 @@ def send_welcome(message):
         "• 'проверь по ГОСТ 3325-85 зазор=0.15'"
     )
 
+# ============================================================
+#  АВТОРИЗАЦИЯ И РОЛИ
+# ============================================================
+
+@bot.message_handler(commands=['login'])
+def cmd_login(message):
+    """Регистрация/вход пользователя."""
+    user = db.get_user(message.chat.id)
+    if user and user.get("approved"):
+        bot.reply_to(message, f"✅ Вы уже авторизованы как {user['name']} ({db.ROLE_LABELS.get(user['role'], user['role'])}).")
+        return
+    if user and not user.get("approved"):
+        bot.reply_to(message, "⏳ Ваша заявка ещё на рассмотрении. Ожидайте одобрения.")
+        return
+    # Начинаем регистрацию: спрашиваем ФИО
+    set_chat_state(message.chat.id, "reg_step", "name")
+    bot.reply_to(message, "📝 Регистрация. Введите ваше ФИО:")
+
+
+@bot.message_handler(commands=['approve'])
+def cmd_approve(message):
+    """Одобрение/отклонение заявок на регистрацию (инженер-технолог или директор)."""
+    user = db.get_user(message.chat.id)
+    if not db.can_approve_users(user):
+        bot.reply_to(message, "🚫 У вас нет прав на одобрение пользователей.")
+        return
+    pending = db.get_pending_users()
+    if not pending:
+        bot.reply_to(message, "📭 Нет заявок на одобрение.")
+        return
+    lines = ["📋 Заявки на регистрацию:"]
+    for p in pending:
+        lines.append(f"{p['user_id']}: {p['name']} — {db.ROLE_LABELS.get(p['role_requested'], p['role_requested'])}")
+    lines.append("\nОтветьте: /approve_yes <id> или /approve_no <id>")
+    bot.reply_to(message, "\n".join(lines))
+
+
+@bot.message_handler(commands=['approve_yes'])
+def cmd_approve_yes(message):
+    user = db.get_user(message.chat.id)
+    if not db.can_approve_users(user):
+        bot.reply_to(message, "🚫 Нет прав.")
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        bot.reply_to(message, "Укажите id: /approve_yes <id>")
+        return
+    try:
+        uid = int(parts[1])
+    except ValueError:
+        bot.reply_to(message, "Неверный id.")
+        return
+    pending = db.get_pending_users()
+    target = next((p for p in pending if p['user_id'] == uid), None)
+    if not target:
+        bot.reply_to(message, "Заявка не найдена.")
+        return
+    db.create_user(uid, target['name'], target['role_requested'], target.get('phone'), approved=1)
+    db.remove_pending_user(uid)
+    db.log_action(user['user_id'], "approve_user", details=f"Одобрен пользователь {target['name']} ({uid})")
+    bot.reply_to(message, f"✅ Пользователь {target['name']} одобрен.")
+    try:
+        bot.send_message(uid, f"✅ Ваша регистрация одобрена. Добро пожаловать, {target['name']}!")
+    except Exception:
+        pass
+
+
+@bot.message_handler(commands=['approve_no'])
+def cmd_approve_no(message):
+    user = db.get_user(message.chat.id)
+    if not db.can_approve_users(user):
+        bot.reply_to(message, "🚫 Нет прав.")
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        bot.reply_to(message, "Укажите id: /approve_no <id>")
+        return
+    try:
+        uid = int(parts[1])
+    except ValueError:
+        bot.reply_to(message, "Неверный id.")
+        return
+    db.remove_pending_user(uid)
+    bot.reply_to(message, f"❌ Заявка {uid} отклонена.")
+    try:
+        bot.send_message(uid, "❌ Ваша заявка на регистрацию отклонена.")
+    except Exception:
+        pass
+
+
+@bot.message_handler(commands=['users'])
+def cmd_users(message):
+    """Список пользователей (для инженера-технолога)."""
+    user = db.get_user(message.chat.id)
+    if not db.is_engineer(user):
+        bot.reply_to(message, "🚫 Только для инженера-технолога.")
+        return
+    conn = db._connect()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users ORDER BY name")
+    rows = cur.fetchall()
+    conn.close()
+    if not rows:
+        bot.reply_to(message, "Пользователей пока нет.")
+        return
+    lines = ["👥 Пользователи:"]
+    for r in rows:
+        status = "✅" if r["approved"] else "⏳"
+        lines.append(f"{status} {r['name']} — {db.ROLE_LABELS.get(r['role'], r['role'])}")
+    bot.reply_to(message, "\n".join(lines))
+
+
 @bot.message_handler(commands=['stats'])
 def show_stats(message):
     """Показывает статистику использования AI"""
@@ -1228,6 +1343,77 @@ def handle_message(message):
     if user_text.startswith('/'):
         return
     
+    # --- РЕГИСТРАЦИЯ НОВОГО ПОЛЬЗОВАТЕЛЯ ---
+    reg_step = get_chat_state(message.chat.id, "reg_step")
+    if reg_step:
+        if reg_step == "name":
+            name = user_text.strip()
+            if not name:
+                bot.reply_to(message, "Введите ФИО:")
+                return
+            set_chat_state(message.chat.id, "reg_name", name)
+            set_chat_state(message.chat.id, "reg_step", "role")
+            bot.reply_to(
+                message,
+                "Выберите роль:\n"
+                "1️⃣ Строитель\n"
+                "2️⃣ Директор\n"
+                "3️⃣ Заказчик\n\n"
+                "Напишите номер или название. Если вы инженер-технолог — введите секретный код."
+            )
+            return
+        if reg_step == "role":
+            name = get_chat_state(message.chat.id, "reg_name")
+            choice = user_text.strip().lower()
+            # Секретный код инженера-технолога
+            if ENGINEER_CODE and choice == ENGINEER_CODE.lower():
+                db.create_user(message.chat.id, name, db.ROLE_ENGINEER, approved=1)
+                set_chat_state(message.chat.id, "reg_step", None)
+                set_chat_state(message.chat.id, "reg_name", None)
+                bot.reply_to(message, f"✅ Вы зарегистрированы как инженер-технолог, {name}!")
+                return
+            role_map = {
+                "1": db.ROLE_BUILDER, "строитель": db.ROLE_BUILDER,
+                "2": db.ROLE_DIRECTOR, "директор": db.ROLE_DIRECTOR,
+                "3": db.ROLE_CUSTOMER, "заказчик": db.ROLE_CUSTOMER,
+            }
+            role = role_map.get(choice)
+            if not role:
+                bot.reply_to(message, "Неверный выбор. Напишите номер (1/2/3) или название роли.")
+                return
+            # Инженер-технолог и директор требуют одобрения
+            db.add_pending_user(message.chat.id, name, role)
+            set_chat_state(message.chat.id, "reg_step", None)
+            set_chat_state(message.chat.id, "reg_name", None)
+            bot.reply_to(
+                message,
+                f"📝 Заявка на роль «{db.ROLE_LABELS.get(role, role)}» отправлена на одобрение.\n"
+                "Ожидайте подтверждения."
+            )
+            # Уведомляем инженера-технолога и директоров
+            conn = db._connect()
+            cur = conn.cursor()
+            cur.execute("SELECT user_id FROM users WHERE role IN (?, ?) AND approved = 1",
+                        (db.ROLE_ENGINEER, db.ROLE_DIRECTOR))
+            approvers = [r["user_id"] for r in cur.fetchall()]
+            conn.close()
+            for uid in approvers:
+                try:
+                    bot.send_message(uid, f"📋 Новая заявка: {name} ({db.ROLE_LABELS.get(role, role)}). /approve")
+                except Exception:
+                    pass
+            return
+    
+    # --- ПРОВЕРКА АВТОРИЗАЦИИ ---
+    user = db.get_user(message.chat.id)
+    if not user or not user.get("approved"):
+        bot.reply_to(
+            message,
+            "🔒 Для работы с ботом необходимо авторизоваться.\n"
+            "Введите /login для регистрации или входа."
+        )
+        return
+
     # --- ОБРАБОТКА УТОЧНЕНИЯ ОСНОВАНИЯ АКТА ---
     pending = get_chat_state(message.chat.id, "pending_act")
     if pending:
