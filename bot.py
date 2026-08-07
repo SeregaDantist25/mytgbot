@@ -11,6 +11,8 @@ from io import BytesIO
 import re
 import json
 import time
+import sqlite3
+import threading
 
 # --- Настройки ---
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -27,6 +29,10 @@ TEMPLATES_DIR = "templates"
 DATA_DIR = "data"
 CHECKLISTS_FILE = os.path.join(DATA_DIR, "checklists.json")
 COUNTERS_FILE = os.path.join(DATA_DIR, "counters.json")
+SHIPS_FILE = os.path.join(DATA_DIR, "ships.json")
+COMPANIES_FILE = os.path.join(DATA_DIR, "companies.json")
+COUNTERS_DB = os.path.join(DATA_DIR, "counters.db")
+CHAT_STATE_FILE = os.path.join(DATA_DIR, "chat_state.json")
 
 # ============================================================
 #  ИМПОРТ ГОСТ ЧЕКЕРА И АЛИСЫ
@@ -73,6 +79,27 @@ def load_checklists():
     
     with open(CHECKLISTS_FILE, 'r', encoding='utf-8') as f:
         return json.load(f)
+
+def load_ships():
+    """Загружает словарь судов из data/ships.json"""
+    if not os.path.exists(SHIPS_FILE):
+        return {}
+    with open(SHIPS_FILE, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+def load_companies():
+    """Загружает дефолтные executor/customer/location из data/companies.json"""
+    defaults = {
+        "executor": "ООО «Новое время»",
+        "customer": "АО «Бункерная компания»",
+        "location": "Рейд 4ый район, г. Находка",
+    }
+    if not os.path.exists(COMPANIES_FILE):
+        return defaults
+    with open(COMPANIES_FILE, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    defaults.update(data)
+    return defaults
 
 class PumpDatabase:
     def __init__(self):
@@ -192,31 +219,117 @@ def replace_placeholders(doc, placeholders):
 
     return doc
 
-def get_counter(doc_type):
+def _init_counters_db():
+    """Создаёт таблицу counters и мигрирует значения из counters.json один раз."""
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR)
-    
+    conn = sqlite3.connect(COUNTERS_DB)
+    cursor = conn.cursor()
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS counters (doc_type TEXT PRIMARY KEY, value INTEGER)"
+    )
+    # Миграция из counters.json (один раз)
     if os.path.exists(COUNTERS_FILE):
-        with open(COUNTERS_FILE, 'r', encoding='utf-8') as f:
-            counters = json.load(f)
-    else:
-        counters = {"da": 0, "avr": 0}
-    
-    return counters.get(doc_type, 0) + 1
+        try:
+            with open(COUNTERS_FILE, 'r', encoding='utf-8') as f:
+                old = json.load(f)
+            for doc_type, value in old.items():
+                cursor.execute(
+                    "INSERT OR IGNORE INTO counters (doc_type, value) VALUES (?, ?)",
+                    (doc_type, value)
+                )
+            conn.commit()
+            # После миграции переименовываем json, чтобы не мигрировать повторно
+            os.rename(COUNTERS_FILE, COUNTERS_FILE + ".migrated")
+        except Exception as e:
+            print(f"⚠️ Ошибка миграции счётчиков: {e}")
+    conn.commit()
+    conn.close()
+
+_init_counters_db()
+
+def get_next_number(doc_type):
+    """Атомарно инкрементирует счётчик и возвращает новое значение."""
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
+    conn = sqlite3.connect(COUNTERS_DB)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE counters SET value = value + 1 WHERE doc_type = ? RETURNING value",
+        (doc_type,)
+    )
+    row = cursor.fetchone()
+    if row is None:
+        cursor.execute("INSERT INTO counters (doc_type, value) VALUES (?, 1)", (doc_type,))
+        conn.commit()
+        conn.close()
+        return 1
+    conn.commit()
+    conn.close()
+    return row[0]
+
+def get_counter(doc_type):
+    """Обратная совместимость: возвращает следующий номер без инкремента."""
+    return get_next_number(doc_type)
 
 def update_counter(doc_type, new_number):
+    """Обратная совместимость: устанавливает счётчик в заданное значение."""
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR)
-    
-    if os.path.exists(COUNTERS_FILE):
-        with open(COUNTERS_FILE, 'r', encoding='utf-8') as f:
-            counters = json.load(f)
+    conn = sqlite3.connect(COUNTERS_DB)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO counters (doc_type, value) VALUES (?, ?) "
+        "ON CONFLICT(doc_type) DO UPDATE SET value = excluded.value",
+        (doc_type, new_number)
+    )
+    conn.commit()
+    conn.close()
+
+# ============================================================
+#  ПЕРСИСТЕНТНОЕ ХРАНИЛИЩЕ СОСТОЯНИЯ ДИАЛОГА
+# ============================================================
+
+_chat_state_lock = threading.Lock()
+
+def _load_chat_state():
+    """Загружает chat_state.json в память (с блокировкой)."""
+    with _chat_state_lock:
+        if not os.path.exists(CHAT_STATE_FILE):
+            return {}
+        try:
+            with open(CHAT_STATE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+def _save_chat_state(state):
+    """Сохраняет chat_state.json на диск (с блокировкой)."""
+    with _chat_state_lock:
+        if not os.path.exists(DATA_DIR):
+            os.makedirs(DATA_DIR)
+        tmp = CHAT_STATE_FILE + ".tmp"
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, CHAT_STATE_FILE)
+
+# Инициализация состояния диалога из файла
+_chat_state = _load_chat_state()
+
+def get_chat_state(chat_id, key):
+    """Возвращает значение состояния для чата (или None)."""
+    return _chat_state.get(str(chat_id), {}).get(key)
+
+def set_chat_state(chat_id, key, value):
+    """Устанавливает значение состояния для чата и сохраняет на диск."""
+    cid = str(chat_id)
+    if cid not in _chat_state:
+        _chat_state[cid] = {}
+    if value is None:
+        _chat_state[cid].pop(key, None)
     else:
-        counters = {"da": 0, "avr": 0}
-    
-    counters[doc_type] = new_number
-    with open(COUNTERS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(counters, f, ensure_ascii=False, indent=2)
+        _chat_state[cid][key] = value
+    _save_chat_state(_chat_state)
 
 # ============================================================
 #  ОПРЕДЕЛЕНИЕ ТИПА ОБОРУДОВАНИЯ (ЛОКАЛЬНОЕ)
@@ -244,10 +357,10 @@ def ask_for_clarification(equipment):
 
 def detect_ship(text):
     text_lower = text.lower()
-    ships = ["аргака", "пластун", "славянская", "первоуральск", "керчь", "краснодар"]
-    for ship in ships:
-        if ship in text_lower:
-            return ship.capitalize()
+    ships = load_ships()
+    for key, name in ships.items():
+        if key in text_lower:
+            return name
     return None
 
 def detect_pump_type(text):
@@ -706,8 +819,7 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     """Создаёт акт дефектации с таблицей, подходящей под тип оборудования"""
     doc = load_template("defect_act_template.docx")
     
-    number = get_counter("da")
-    update_counter("da", number)
+    number = get_next_number("da")
     
     date_str = datetime.now().strftime('%d.%m.%Y')
     ship_code = ship[:3].upper() if ship else "XXX"
@@ -844,11 +956,14 @@ def create_defect_document(ship, equipment, defects, work_volume, pump_type=None
     file_stream.seek(0)
     return file_stream
 
-def create_avr_document(ship, works, executor="ООО «Новое время»", customer="АО «Бункерная компания»", location="Рейд 4ый район, г. Находка"):
+def create_avr_document(ship, works, executor=None, customer=None, location=None):
+    companies = load_companies()
+    executor = executor or companies.get("executor")
+    customer = customer or companies.get("customer")
+    location = location or companies.get("location")
     doc = load_template("avr_template.docx")
     
-    number = get_counter("avr")
-    update_counter("avr", number)
+    number = get_next_number("avr")
     
     date_str = datetime.now().strftime('%d.%m.%Y')
     ship_code = ship[:3].upper() if ship else "XXX"
@@ -1034,13 +1149,8 @@ def search_gosts(message):
 #  ГЛАВНЫЙ ОБРАБОТЧИК (ЧЕРЕЗ АЛИСУ)
 # ============================================================
 
-clarification_states = {}
-
 # История диалогов для контекста (для Алисы)
 user_histories = {}
-
-# Ожидающие акты дефектации (ждут уточнения основания)
-pending_acts = {}
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -1051,17 +1161,17 @@ def handle_message(message):
         return
     
     # --- ОБРАБОТКА УТОЧНЕНИЯ ОСНОВАНИЯ АКТА ---
-    if message.chat.id in pending_acts and pending_acts[message.chat.id]:
+    pending = get_chat_state(message.chat.id, "pending_act")
+    if pending:
         if text_lower.strip() in ("отмена", "отменить", "cancel", "стоп"):
-            del pending_acts[message.chat.id]
+            set_chat_state(message.chat.id, "pending_act", None)
             bot.reply_to(message, "Отменено. Акт не создан.")
             return
-        pending = pending_acts[message.chat.id]
         basis = user_text.strip()
         if not basis:
             bot.reply_to(message, "Пожалуйста, укажите основание для акта.")
             return
-        del pending_acts[message.chat.id]
+        set_chat_state(message.chat.id, "pending_act", None)
         try:
             file_stream = create_defect_document(
                 pending["ship"], pending["equipment"], pending["defects"],
@@ -1081,18 +1191,18 @@ def handle_message(message):
         return
 
     # --- ОБРАБОТКА УТОЧНЕНИЙ ---
-    if message.chat.id in clarification_states and clarification_states[message.chat.id]:
+    if get_chat_state(message.chat.id, "clarification"):
         equipment_type = text_lower
         if "1" in equipment_type or "насос" in equipment_type:
-            clarification_states[message.chat.id] = "pump"
+            set_chat_state(message.chat.id, "clarification", "pump")
             bot.reply_to(message, "✅ Принято: насос")
             return
         elif "2" in equipment_type or "двигател" in equipment_type:
-            clarification_states[message.chat.id] = "engine"
+            set_chat_state(message.chat.id, "clarification", "engine")
             bot.reply_to(message, "✅ Принято: двигатель")
             return
         else:
-            clarification_states[message.chat.id] = "other"
+            set_chat_state(message.chat.id, "clarification", "other")
             bot.reply_to(message, "✅ Принято: другое оборудование")
             return
     
@@ -1227,7 +1337,7 @@ def handle_act_creation(message, user_text):
         
         # Сохраняем данные акта и уточняем основание
         repair_type = act_data.get('repair_type')
-        pending_acts[message.chat.id] = {
+        set_chat_state(message.chat.id, "pending_act", {
             "ship": ship,
             "equipment": equipment,
             "defects": defects,
@@ -1235,7 +1345,7 @@ def handle_act_creation(message, user_text):
             "pump_type": pump_type,
             "repair_type": repair_type,
             "purpose": "Определение технического состояния и объема ремонта",
-        }
+        })
         bot.send_message(
             message.chat.id,
             "📋 Данные акта определены. Укажите основание для акта, например:\n"
