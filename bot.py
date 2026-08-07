@@ -674,10 +674,23 @@ def build_defect_table_engine(defects, work_volume):
         else:
             section = "Прочее"
         
+        if not defect or defect == "Не указано":
+            defect_text = DEFAULT_NO_DEFECT_TEXT
+            work_text = DEFAULT_NO_DEFECT_WORK
+        else:
+            defect_lower = defect.lower()
+            matched = None
+            for keyword, action in ACTION_MAP.items():
+                if keyword in defect_lower:
+                    matched = action
+                    break
+            defect_text = defect
+            work_text = matched or work_volume
+
         rows.append({
             "num": str(i),
-            "defect": defect,
-            "work": work_volume,
+            "defect": defect_text,
+            "work": work_text,
             "unit": "компл.",
             "qty": "1",
             "section": section
@@ -1039,6 +1052,10 @@ def handle_message(message):
     
     # --- ОБРАБОТКА УТОЧНЕНИЯ ОСНОВАНИЯ АКТА ---
     if message.chat.id in pending_acts and pending_acts[message.chat.id]:
+        if text_lower.strip() in ("отмена", "отменить", "cancel", "стоп"):
+            del pending_acts[message.chat.id]
+            bot.reply_to(message, "Отменено. Акт не создан.")
+            return
         pending = pending_acts[message.chat.id]
         basis = user_text.strip()
         if not basis:
