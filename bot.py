@@ -1315,7 +1315,8 @@ def handle_local_fallback(message, user_text):
             pump_name = pump_db.get_pump_name(pump_type)
             response = f"📋 **Чек-лист для {pump_name} насоса:**\n\n"
             for i, item in enumerate(items, 1):
-                response += f"{i}. {item}\n"
+                name = item.get("name") if isinstance(item, dict) else item
+                response += f"{i}. {name}\n"
             bot.reply_to(message, response, parse_mode='Markdown')
         else:
             bot.reply_to(message, "📌 Уточните тип насоса: центробежный, шестерёнчатый или поршневой")
