@@ -332,6 +332,74 @@ def set_chat_state(chat_id, key, value):
     _save_chat_state(_chat_state)
 
 # ============================================================
+#  GIT: АВТОКОММИТ И АВТОПУШ КОНФИГОВ
+# ============================================================
+
+import subprocess
+
+# Полный путь к git (в PATH его может не быть)
+_GIT_EXE = r"C:\Program Files\Git\bin\git.exe"
+
+def _git(*args):
+    """Выполняет git-команду и возвращает (returncode, output)."""
+    try:
+        result = subprocess.run(
+            [_GIT_EXE] + list(args),
+            capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+        return result.returncode, (result.stdout + result.stderr).strip()
+    except Exception as e:
+        return 1, str(e)
+
+def git_commit_and_push(files, message):
+    """Добавляет файлы, коммитит и пушит. Возвращает (ok, text)."""
+    code, out = _git("add", "--", *files)
+    if code != 0:
+        return False, f"git add: {out}"
+    code, out = _git("commit", "-m", message)
+    if code != 0 and "nothing to commit" not in out.lower():
+        return False, f"git commit: {out}"
+    code, out = _git("push", "origin", "master")
+    if code != 0:
+        return False, f"git push: {out}"
+    return True, out
+
+# ============================================================
+#  ДОБАВЛЕНИЕ СУДОВ И КОМПАНИЙ (С АВТОПУШЕМ)
+# ============================================================
+
+def add_ship(name):
+    """Добавляет судно в ships.json и пушит. Возвращает (ok, text)."""
+    name = name.strip()
+    if not name:
+        return False, "Пустое название судна."
+    ships = load_ships()
+    key = name.lower()
+    if key in ships:
+        return False, f"Судно «{name}» уже есть в списке."
+    ships[key] = name
+    with open(SHIPS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(ships, f, ensure_ascii=False, indent=2)
+    ok, text = git_commit_and_push([SHIPS_FILE], f"feat: добавить судно {name}")
+    if ok:
+        return True, f"✅ Судно «{name}» добавлено и запушено в репозиторий."
+    return True, f"✅ Судно «{name}» добавлено в файл, но пуш не удался: {text}"
+
+def add_company(field, value):
+    """Обновляет поле компании (executor/customer/location) и пушит."""
+    value = value.strip()
+    if not value:
+        return False, "Пустое значение."
+    companies = load_companies()
+    companies[field] = value
+    with open(COMPANIES_FILE, 'w', encoding='utf-8') as f:
+        json.dump(companies, f, ensure_ascii=False, indent=2)
+    ok, text = git_commit_and_push([COMPANIES_FILE], f"feat: обновить {field} в companies.json")
+    if ok:
+        return True, f"✅ Поле «{field}» обновлено и запушено в репозиторий."
+    return True, f"✅ Поле «{field}» обновлено в файле, но пуш не удался: {text}"
+
+# ============================================================
 #  ОПРЕДЕЛЕНИЕ ТИПА ОБОРУДОВАНИЯ (ЛОКАЛЬНОЕ)
 # ============================================================
 
@@ -1190,6 +1258,87 @@ def handle_message(message):
             bot.send_message(message.chat.id, f"❌ Ошибка при создании акта:\n\n{str(e)}")
         return
 
+    # --- ОБРАБОТКА ВЫБОРА/ДОБАВЛЕНИЯ СУДНА ---
+    if get_chat_state(message.chat.id, "awaiting_ship"):
+        ships = load_ships()
+        ship_names = list(ships.values())
+        choice = user_text.strip()
+        # Выбор по номеру из списка
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(ship_names):
+                ship = ship_names[idx]
+                set_chat_state(message.chat.id, "awaiting_ship", None)
+                set_chat_state(message.chat.id, "pending_act", {
+                    "ship": ship,
+                    "equipment": get_chat_state(message.chat.id, "draft_equipment"),
+                    "defects": get_chat_state(message.chat.id, "draft_defects"),
+                    "work_volume": get_chat_state(message.chat.id, "draft_work_volume"),
+                    "pump_type": get_chat_state(message.chat.id, "draft_pump_type"),
+                    "repair_type": get_chat_state(message.chat.id, "draft_repair_type"),
+                    "purpose": "Определение технического состояния и объема ремонта",
+                })
+                bot.send_message(
+                    message.chat.id,
+                    f"✅ Судно: {ship}. Укажите основание для акта, например:\n"
+                    "«План-график ремонта на 2026 год» или «Заявка капитана»"
+                )
+                return
+            else:
+                bot.reply_to(message, "❌ Неверный номер. Выберите из списка или напишите название нового судна.")
+                return
+        # Добавление нового судна
+        if choice.lower() in ("новое", "добавить", "новое судно"):
+            set_chat_state(message.chat.id, "awaiting_ship", "new")
+            bot.reply_to(message, "✏️ Напишите название нового судна:")
+            return
+        # Если в состоянии "new" — это название нового судна
+        if get_chat_state(message.chat.id, "awaiting_ship") == "new":
+            ok, text = add_ship(choice)
+            if ok:
+                set_chat_state(message.chat.id, "awaiting_ship", None)
+                set_chat_state(message.chat.id, "pending_act", {
+                    "ship": choice.strip(),
+                    "equipment": get_chat_state(message.chat.id, "draft_equipment"),
+                    "defects": get_chat_state(message.chat.id, "draft_defects"),
+                    "work_volume": get_chat_state(message.chat.id, "draft_work_volume"),
+                    "pump_type": get_chat_state(message.chat.id, "draft_pump_type"),
+                    "repair_type": get_chat_state(message.chat.id, "draft_repair_type"),
+                    "purpose": "Определение технического состояния и объема ремонта",
+                })
+                bot.send_message(message.chat.id, text)
+                bot.send_message(
+                    message.chat.id,
+                    "Укажите основание для акта, например:\n"
+                    "«План-график ремонта на 2026 год» или «Заявка капитана»"
+                )
+            else:
+                bot.reply_to(message, text)
+            return
+        # Прямое название судна (не номер)
+        if choice:
+            ok, text = add_ship(choice)
+            if ok:
+                set_chat_state(message.chat.id, "awaiting_ship", None)
+                set_chat_state(message.chat.id, "pending_act", {
+                    "ship": choice.strip(),
+                    "equipment": get_chat_state(message.chat.id, "draft_equipment"),
+                    "defects": get_chat_state(message.chat.id, "draft_defects"),
+                    "work_volume": get_chat_state(message.chat.id, "draft_work_volume"),
+                    "pump_type": get_chat_state(message.chat.id, "draft_pump_type"),
+                    "repair_type": get_chat_state(message.chat.id, "draft_repair_type"),
+                    "purpose": "Определение технического состояния и объема ремонта",
+                })
+                bot.send_message(message.chat.id, text)
+                bot.send_message(
+                    message.chat.id,
+                    "Укажите основание для акта, например:\n"
+                    "«План-график ремонта на 2026 год» или «Заявка капитана»"
+                )
+            else:
+                bot.reply_to(message, text)
+            return
+
     # --- ОБРАБОТКА УТОЧНЕНИЙ ---
     if get_chat_state(message.chat.id, "clarification"):
         equipment_type = text_lower
@@ -1313,10 +1462,21 @@ def handle_act_creation(message, user_text):
         work_volume = act_data.get('work_volume', generate_base_work_volume(["Не указано"]))
 
         if not ship or ship == "Не указано":
+            # Сохраняем черновик данных акта и предлагаем выбрать/добавить судно
+            set_chat_state(message.chat.id, "draft_equipment", equipment)
+            set_chat_state(message.chat.id, "draft_defects", defects)
+            set_chat_state(message.chat.id, "draft_work_volume", work_volume)
+            set_chat_state(message.chat.id, "draft_pump_type", detect_pump_type(user_text))
+            set_chat_state(message.chat.id, "draft_repair_type", act_data.get('repair_type'))
+            ships = load_ships()
+            ship_names = list(ships.values())
+            list_text = "\n".join(f"{i+1}. {name}" for i, name in enumerate(ship_names))
+            set_chat_state(message.chat.id, "awaiting_ship", "choose")
             bot.send_message(
                 message.chat.id,
-                "🚫 Не удалось определить судно. Укажите его явно, например:\n"
-                "«Акт дефектации для теплохода «Восток», насос ЭСН-11, износ подшипников»"
+                "🚢 Не удалось определить судно. Выберите из списка или добавьте новое:\n\n"
+                f"{list_text}\n\n"
+                "Напишите номер судна, название нового судна, или «новое» для добавления."
             )
             return
 
