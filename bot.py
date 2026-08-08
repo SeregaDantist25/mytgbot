@@ -14,7 +14,9 @@ import time
 import sqlite3
 import threading
 import db
-import scanner
+
+# scanner импортируется лениво (внутри функций), т.к. требует openpyxl,
+# который может отсутствовать на сервере при старте.
 
 # --- Настройки ---
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -1256,6 +1258,7 @@ def cmd_scan(message):
         bot.reply_to(message, "🔒 Сначала авторизуйтесь: /login")
         return
     bot.reply_to(message, "🔍 Сканирую папку repair_docs...")
+    import scanner
     messages = scanner.scan_repair_docs(uploaded_by=user["user_id"])
     for m in messages:
         bot.send_message(message.chat.id, m)
@@ -1944,6 +1947,7 @@ def start_scan_timer():
         while True:
             time.sleep(12 * 60 * 60)  # 12 часов
             try:
+                import scanner
                 messages = scanner.scan_repair_docs()
                 for m in messages:
                     print(f"[SCAN] {m}")

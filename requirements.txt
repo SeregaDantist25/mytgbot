@@ -1,3 +1,4 @@
 pyTelegramBotAPI
 httpx
 python-docx
+openpyxl
