@@ -98,6 +98,8 @@ def init_db():
                 ship_id INTEGER NOT NULL,
                 item_number TEXT NOT NULL,
                 description TEXT,
+                quantity TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
                 FOREIGN KEY (ship_id) REFERENCES ships(ship_id)
             );
 
@@ -147,6 +149,12 @@ def init_db():
             );
             """
         )
+        # Миграция: добавляем недостающие колонки в repair_items
+        cols = [r[1] for r in cur.execute("PRAGMA table_info(repair_items)").fetchall()]
+        if "quantity" not in cols:
+            cur.execute("ALTER TABLE repair_items ADD COLUMN quantity TEXT")
+        if "status" not in cols:
+            cur.execute("ALTER TABLE repair_items ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
         conn.commit()
         conn.close()
 
@@ -344,12 +352,12 @@ def update_ship(ship_id, **fields):
 #  ПУНКТЫ РЕМОНТНОЙ ВЕДОМОСТИ
 # ============================================================
 
-def add_repair_item(ship_id, item_number, description=None):
+def add_repair_item(ship_id, item_number, description=None, quantity=None, status="active"):
     conn = _connect()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO repair_items (ship_id, item_number, description) VALUES (?, ?, ?)",
-        (ship_id, item_number, description),
+        "INSERT INTO repair_items (ship_id, item_number, description, quantity, status) VALUES (?, ?, ?, ?, ?)",
+        (ship_id, item_number, description, quantity, status),
     )
     conn.commit()
     item_id = cur.lastrowid
@@ -364,6 +372,21 @@ def get_repair_items(ship_id):
     rows = cur.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def replace_repair_items(ship_id, items):
+    """Заменяет все пункты ремонтной ведомости судна новым списком.
+    items — список dict {item_number, description, quantity, status}."""
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM repair_items WHERE ship_id = ?", (ship_id,))
+    for it in items:
+        cur.execute(
+            "INSERT INTO repair_items (ship_id, item_number, description, quantity, status) VALUES (?, ?, ?, ?, ?)",
+            (ship_id, it.get("item_number"), it.get("description"), it.get("quantity"), it.get("status", "active")),
+        )
+    conn.commit()
+    conn.close()
 
 
 def get_repair_item(item_id):

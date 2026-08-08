@@ -14,6 +14,7 @@ import time
 import sqlite3
 import threading
 import db
+import scanner
 
 # --- Настройки ---
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -1243,6 +1244,105 @@ def cmd_users(message):
     bot.reply_to(message, "\n".join(lines))
 
 
+# ============================================================
+#  СКАНИРОВАНИЕ ПАПКИ repair_docs
+# ============================================================
+
+@bot.message_handler(commands=['scan'])
+def cmd_scan(message):
+    """Сканирует папку repair_docs и обрабатывает новые файлы."""
+    user = db.get_user(message.chat.id)
+    if not user or not user.get("approved"):
+        bot.reply_to(message, "🔒 Сначала авторизуйтесь: /login")
+        return
+    bot.reply_to(message, "🔍 Сканирую папку repair_docs...")
+    messages = scanner.scan_repair_docs(uploaded_by=user["user_id"])
+    for m in messages:
+        bot.send_message(message.chat.id, m)
+    # Уведомляем инженера/директоров о договорах на утверждение
+    notify_contracts_for_approval()
+
+
+def notify_contracts_for_approval():
+    """Уведомляет инженера-технолога и директоров о договорах, ожидающих утверждения."""
+    conn = db._connect()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT d.doc_id, s.name AS ship_name FROM documents d "
+        "JOIN ships s ON s.ship_id = d.ship_id "
+        "WHERE d.doc_type = ? AND d.approved = 0",
+        (db.DOC_CONTRACT,),
+    )
+    pending = cur.fetchall()
+    cur.execute(
+        "SELECT user_id FROM users WHERE role IN (?, ?) AND approved = 1",
+        (db.ROLE_ENGINEER, db.ROLE_DIRECTOR),
+    )
+    approvers = [r["user_id"] for r in cur.fetchall()]
+    conn.close()
+    if not pending:
+        return
+    for uid in approvers:
+        try:
+            lines = ["📄 Договоры, ожидающие утверждения:"]
+            for p in pending:
+                lines.append(f"• {p['ship_name']} (id={p['doc_id']})")
+            lines.append("\nОтветьте: /approve_contract <id> или /reject_contract <id>")
+            bot.send_message(uid, "\n".join(lines))
+        except Exception:
+            pass
+
+
+@bot.message_handler(commands=['approve_contract'])
+def cmd_approve_contract(message):
+    """Утверждение договора (инженер-технолог или директор)."""
+    user = db.get_user(message.chat.id)
+    if not db.can_approve_users(user):
+        bot.reply_to(message, "🚫 Нет прав на утверждение договоров.")
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        bot.reply_to(message, "Укажите id: /approve_contract <id>")
+        return
+    try:
+        doc_id = int(parts[1])
+    except ValueError:
+        bot.reply_to(message, "Неверный id.")
+        return
+    doc = db.get_document(doc_id)
+    if not doc or doc["doc_type"] != db.DOC_CONTRACT:
+        bot.reply_to(message, "Договор не найден.")
+        return
+    db.approve_document(doc_id)
+    db.log_action(user["user_id"], "approve_contract", ship_id=doc["ship_id"], doc_id=doc_id)
+    bot.reply_to(message, f"✅ Договор (id={doc_id}) утверждён.")
+
+
+@bot.message_handler(commands=['reject_contract'])
+def cmd_reject_contract(message):
+    """Отклонение договора (инженер-технолог или директор)."""
+    user = db.get_user(message.chat.id)
+    if not db.can_approve_users(user):
+        bot.reply_to(message, "🚫 Нет прав.")
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        bot.reply_to(message, "Укажите id: /reject_contract <id>")
+        return
+    try:
+        doc_id = int(parts[1])
+    except ValueError:
+        bot.reply_to(message, "Неверный id.")
+        return
+    doc = db.get_document(doc_id)
+    if not doc:
+        bot.reply_to(message, "Договор не найден.")
+        return
+    db.delete_document(doc_id)
+    db.log_action(user["user_id"], "reject_contract", ship_id=doc["ship_id"], doc_id=doc_id)
+    bot.reply_to(message, f"❌ Договор (id={doc_id}) отклонён и удалён.")
+
+
 @bot.message_handler(commands=['stats'])
 def show_stats(message):
     """Показывает статистику использования AI"""
@@ -1838,6 +1938,22 @@ def handle_local_fallback(message, user_text):
 #  ЗАПУСК С ПОВТОРНЫМИ ПОПЫТКАМИ
 # ============================================================
 
+def start_scan_timer():
+    """Запускает периодическое сканирование папки repair_docs (раз в 12 часов)."""
+    def _run():
+        while True:
+            time.sleep(12 * 60 * 60)  # 12 часов
+            try:
+                messages = scanner.scan_repair_docs()
+                for m in messages:
+                    print(f"[SCAN] {m}")
+                notify_contracts_for_approval()
+            except Exception as e:
+                print(f"[SCAN] Ошибка: {e}")
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+
 def start_bot_with_retry():
     """Запуск бота с повторными попытками подключения"""
     max_retries = 5
@@ -1888,5 +2004,8 @@ if __name__ == '__main__':
     else:
         print("⚠️ ГОСТ чекер не загружен")
     
+    # Периодическое сканирование папки repair_docs
+    start_scan_timer()
+
     # Запуск с повторными попытками
     start_bot_with_retry()
