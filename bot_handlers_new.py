@@ -174,7 +174,7 @@ def register_upload_handlers(bot):
 #  ПЛАН 2: НАВИГАЦИЯ ПО ПУНКТАМ
 # ============================================================
 
-def _show_ships_menu(chat_id):
+def _show_ships_menu(bot, chat_id):
     """Показать список судов для навигации по ремонтной ведомости."""
     session = SessionLocal()
     try:
@@ -213,13 +213,13 @@ def register_navigation_handlers(bot):
             bot.reply_to(message, "🔒 Сначала авторизуйтесь.")
             return
 
-        _show_ships_menu(message.chat.id)
+        _show_ships_menu(bot, message.chat.id)
 
     # Reply-кнопки навигации (отправляют обычный текст)
     @bot.message_handler(func=lambda message: message.text in ("📋 Ремонтная ведомость", "🚢 Суда"))
     def handle_nav_repair_list(message):
         """Кнопки «Ремонтная ведомость» и «Суда» → список судов."""
-        _show_ships_menu(message.chat.id)
+        _show_ships_menu(bot, message.chat.id)
 
     @bot.message_handler(func=lambda message: message.text == "📄 Документы")
     def handle_nav_documents(message):
