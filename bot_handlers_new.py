@@ -175,13 +175,34 @@ def register_upload_handlers(bot):
 # ============================================================
 
 def _show_ships_menu(bot, chat_id):
-    """Показать список судов для навигации по ремонтной ведомости."""
+    """Показать список судов для навигации по ремонтной ведомости.
+    
+    Если судов нет в БД, попытается синхронизировать из ships.json.
+    Если всё равно нет — предложит добавить судно.
+    """
     session = SessionLocal()
     try:
         ships = session.query(Ship).all()
         if not ships:
-            bot.send_message(chat_id, "❌ Нет судов в системе.")
-            return
+            # Попытаться синхронизировать суда из ships.json
+            added = dm.sync_ships_from_json()
+            if added:
+                # Перезагрузить список судов
+                ships = session.query(Ship).all()
+            else:
+                # Нет судов ни в БД, ни в ships.json
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton(
+                    text="➕ Добавить судно",
+                    callback_data="add_ship"
+                ))
+                bot.send_message(
+                    chat_id,
+                    "❌ Нет судов в системе.\n\n"
+                    "Нажмите кнопку ниже, чтобы добавить первое судно.",
+                    reply_markup=markup
+                )
+                return
 
         # Показать меню выбора судна
         markup = types.InlineKeyboardMarkup()
@@ -384,6 +405,38 @@ def register_navigation_handlers(bot):
             reply_markup=markup
         )
         bot.answer_callback_query(call.id)
+    
+    @bot.callback_query_handler(func=lambda call: call.data == "add_ship")
+    def handle_add_ship(call):
+        """Обработчик кнопки 'Добавить судно'."""
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            call.message.chat.id,
+            "📝 Введите название судна:"
+        )
+        
+        def process_add_ship_inner(message):
+            """Обработчик ввода названия судна."""
+            ship_name = message.text.strip()
+            if not ship_name:
+                bot.send_message(message.chat.id, "❌ Название не может быть пустым.")
+                return
+            
+            try:
+                ship = dm.ensure_ship_exists(ship_name)
+                bot.send_message(
+                    message.chat.id,
+                    f"✅ Судно '{ship.name}' добавлено в систему!"
+                )
+                # Показать меню судов
+                _show_ships_menu(bot, message.chat.id)
+            except Exception as e:
+                bot.send_message(
+                    message.chat.id,
+                    f"❌ Ошибка при добавлении судна: {str(e)}"
+                )
+        
+        bot.register_next_step_handler(call.message, process_add_ship_inner)
 
 
 # ============================================================
