@@ -73,7 +73,7 @@ except Exception as e:
 # Пытаемся загрузить Алису (ai_router)
 alisa_router = None
 try:
-    from models.ai_router import router as alisa_router
+    from ai.ai_router import router as alisa_router
     print(f"✅ Алиса (YandexGPT) загружена успешно!")
 except ImportError as e:
     print(f"⚠️ Модуль ai_router не найден: {e}")
@@ -83,7 +83,7 @@ except Exception as e:
 # Пытаемся загрузить создателя актов через Алису
 alisa_act_creator = None
 try:
-    from models.alisa_act_creator import act_creator as alisa_act_creator
+    from ai.alisa_act_creator import act_creator as alisa_act_creator
     print(f"✅ Создатель актов через Алису загружен!")
 except ImportError as e:
     print(f"⚠️ Модуль alisa_act_creator не найден: {e}")
