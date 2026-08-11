@@ -1846,11 +1846,6 @@ def handle_message(message):
     if user_text.startswith('/'):
         return
     
-    # --- КНОПКИ НАВИГАЦИИ (для всех ролей) ---
-    if user_text.strip() in NAVIGATION_BUTTONS:
-        show_navigation_menu(message.chat.id)
-        return
-    
     # --- ПРОВЕРКА РОЛИ (интеграция с NLP) ---
     # Только engineer_technologist и админы могут использовать NLP-режим
     role = get_user_role(message.chat.id)

@@ -174,42 +174,61 @@ def register_upload_handlers(bot):
 #  ПЛАН 2: НАВИГАЦИЯ ПО ПУНКТАМ
 # ============================================================
 
+def _show_ships_menu(chat_id):
+    """Показать список судов для навигации по ремонтной ведомости."""
+    session = SessionLocal()
+    try:
+        ships = session.query(Ship).all()
+        if not ships:
+            bot.send_message(chat_id, "❌ Нет судов в системе.")
+            return
+
+        # Показать меню выбора судна
+        markup = types.InlineKeyboardMarkup()
+        for ship in ships:
+            btn = types.InlineKeyboardButton(
+                text=ship.name,
+                callback_data=f"ship_{ship.id}"
+            )
+            markup.add(btn)
+
+        bot.send_message(
+            chat_id,
+            "🚢 Выберите судно:",
+            reply_markup=markup
+        )
+    finally:
+        session.close()
+
+
 def register_navigation_handlers(bot):
     """Регистрирует обработчики навигации по пунктам ремонтной ведомости."""
-    
+
     @bot.message_handler(commands=['repair_list'])
     def cmd_repair_list(message):
         """Показать ремонтную ведомость судна."""
         user_role = dm.get_user_role(message.chat.id)
-        
+
         if not user_role:
             bot.reply_to(message, "🔒 Сначала авторизуйтесь.")
             return
-        
-        # Получить список судов
-        session = SessionLocal()
-        try:
-            ships = session.query(Ship).all()
-            if not ships:
-                bot.reply_to(message, "❌ Нет судов в системе.")
-                return
-            
-            # Показать меню выбора судна
-            markup = types.InlineKeyboardMarkup()
-            for ship in ships:
-                btn = types.InlineKeyboardButton(
-                    text=ship.name,
-                    callback_data=f"ship_{ship.id}"
-                )
-                markup.add(btn)
-            
-            bot.send_message(
-                message.chat.id,
-                "🚢 Выберите судно:",
-                reply_markup=markup
-            )
-        finally:
-            session.close()
+
+        _show_ships_menu(message.chat.id)
+
+    # Reply-кнопки навигации (отправляют обычный текст)
+    @bot.message_handler(func=lambda message: message.text in ("📋 Ремонтная ведомость", "🚢 Суда"))
+    def handle_nav_repair_list(message):
+        """Кнопки «Ремонтная ведомость» и «Суда» → список судов."""
+        _show_ships_menu(message.chat.id)
+
+    @bot.message_handler(func=lambda message: message.text == "📄 Документы")
+    def handle_nav_documents(message):
+        """Кнопка «Документы» → подсказка."""
+        bot.send_message(
+            message.chat.id,
+            "📄 Чтобы посмотреть документы, выберите судно и пункт в ремонтной ведомости "
+            "(кнопка «📋 Ремонтная ведомость»)."
+        )
     
     @bot.callback_query_handler(func=lambda call: call.data.startswith("ship_"))
     def handle_ship_select(call):
