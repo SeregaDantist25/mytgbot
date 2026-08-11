@@ -11,3 +11,6 @@ archive/
 # Рабочие данные (создаются при работе бота)
 data/counters.db
 data/chat_state.json
+
+# Логи
+bot.log

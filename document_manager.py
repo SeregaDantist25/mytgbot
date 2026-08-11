@@ -69,6 +69,30 @@ def ensure_ship_exists(ship_name):
         session.close()
 
 
+def sync_ships_from_json():
+    """Синхронизирует суда из data/ships.json в таблицу ships.
+
+    Если файла нет или он пуст — ничего не делает.
+    Возвращает список названий судов, добавленных в БД.
+    """
+    import json
+    data_dir = os.getenv("DATA_DIR", "data")
+    ships_file = os.path.join(data_dir, "ships.json")
+    if not os.path.exists(ships_file):
+        return []
+    try:
+        with open(ships_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return []
+    added = []
+    for name in data.values():
+        ship = ensure_ship_exists(name)
+        if ship:
+            added.append(ship.name)
+    return added
+
+
 # ============================================================
 #  ПЛАН 1: ИНТЕГРАЦИЯ ПАРСЕРА EXCEL
 # ============================================================

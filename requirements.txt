@@ -6,3 +6,4 @@ SQLAlchemy==2.0.51
 psycopg2-binary==2.9.9
 reportlab==4.0.9
 pydantic==2.10.0
+pytest==9.1.1
