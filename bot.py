@@ -1,4 +1,5 @@
 import os
+import logging
 import telebot
 from telebot.handler_backends import State, StatesGroup
 from telebot import custom_filters
@@ -30,6 +31,8 @@ except ImportError as e:
 
 # scanner импортируется лениво (внутри функций), т.к. требует openpyxl,
 # который может отсутствовать на сервере при старте.
+
+logger = logging.getLogger(__name__)
 
 # --- Настройки ---
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -96,10 +99,15 @@ def load_checklists():
         os.makedirs(DATA_DIR)
     
     if not os.path.exists(CHECKLISTS_FILE):
-        raise FileNotFoundError(f"Файл {CHECKLISTS_FILE} не найден!")
+        logger.warning(f"Файл {CHECKLISTS_FILE} не найден! Используется пустой словарь.")
+        return {}
     
-    with open(CHECKLISTS_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    try:
+        with open(CHECKLISTS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке {CHECKLISTS_FILE}: {e}")
+        return {}
 
 def load_ships():
     """Загружает словарь судов из data/ships.json"""
