@@ -23,26 +23,32 @@ def setup_logging(log_level: str = "INFO", log_file: str = "bot.log") -> logging
     # Создаём корневой логгер
     logger = logging.getLogger()
     logger.setLevel(getattr(logging, log_level))
-    
+
+    # Удаляем старые хендлеры, чтобы избежать дублирования записей
+    # (config.py вызывает setup_logging при импорте, bot.py — повторно)
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
+
     # Форматер для логов
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    
+
     # Обработчик для консоли
     console_handler = logging.StreamHandler()
     console_handler.setLevel(getattr(logging, log_level))
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
-    
+
     # Обработчик для файла (если указан)
     if log_file:
         # Создаём директорию для логов если её нет
         log_dir = os.path.dirname(log_file)
         if log_dir and not os.path.exists(log_dir):
             os.makedirs(log_dir)
-        
+
         # Rotating file handler (максимум 10 MB на файл, 5 файлов)
         file_handler = logging.handlers.RotatingFileHandler(
             log_file,
@@ -52,7 +58,7 @@ def setup_logging(log_level: str = "INFO", log_file: str = "bot.log") -> logging
         file_handler.setLevel(getattr(logging, log_level))
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
-    
+
     return logger
 
 
