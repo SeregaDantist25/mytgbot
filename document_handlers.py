@@ -4,11 +4,14 @@
 Включает загрузку, замену и удаление документов.
 """
 
+import logging
 from telebot import types
 from document_states import DocumentStates
 from models import SessionLocal, Document, StatementItem
 from file_storage import storage
 import os
+
+logger = logging.getLogger(__name__)
 
 
 def register_document_handlers(bot):
@@ -197,8 +200,8 @@ def register_document_handlers(bot):
             if doc and doc.file_ref:
                 try:
                     storage.delete_file(doc.file_ref)
-                except:
-                    pass  # Игнорируем ошибки удаления
+                except Exception as e:
+                    logger.warning(f"Failed to delete old file {doc.file_ref}: {e}")
             
             # Сохраняем новый файл с тем же item_id и category, но новым содержимым
             file_path = storage.save_file(
@@ -282,8 +285,8 @@ def register_document_handlers(bot):
                 # Удаляем файл из хранилища
                 try:
                     storage.delete_file(doc.file_ref)
-                except:
-                    pass  # Игнорируем ошибки удаления файла
+                except Exception as e:
+                    logger.warning(f"Failed to delete file {doc.file_ref}: {e}")
                 
                 # Удаляем запись из БД
                 session.delete(doc)

@@ -7,6 +7,7 @@
 4. Проверка ролей в handle_message
 """
 
+import logging
 from telebot import types
 from telebot.handler_backends import State, StatesGroup
 import os
@@ -16,6 +17,8 @@ from datetime import datetime
 import document_manager as dm
 from models import SessionLocal, Ship, RepairStatement, StatementItem
 from file_storage import storage
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
 #  STATES ДЛЯ МНОГОШАГОВЫХ СЦЕНАРИЕВ
@@ -158,10 +161,12 @@ def register_upload_handlers(bot):
             os.unlink(temp_file.name)
         
         except Exception as e:
+            logger.error(f"Error processing repair list file: {e}", exc_info=True)
             bot.reply_to(message, f"❌ Ошибка при обработке файла: {str(e)}")
             try:
                 os.unlink(temp_file.name)
-            except:
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to delete temp file: {cleanup_error}")
                 pass
 
 
