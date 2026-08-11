@@ -1,6 +1,7 @@
 import os
 import logging
 import telebot
+from telebot import types
 from telebot.handler_backends import State, StatesGroup
 from telebot import custom_filters
 import httpx
@@ -1316,6 +1317,21 @@ def create_avr_document(ship, works, executor=None, customer=None, location=None
 #  КОМАНДА /START
 # ============================================================
 
+# ============================================================
+#  КНОПКИ НАВИГАЦИИ
+# ============================================================
+
+NAVIGATION_BUTTONS = ["📋 Ремонтная ведомость", "📄 Документы", "🚢 Суда"]
+
+
+def show_navigation_menu(chat_id, text="👋 Используйте кнопки для навигации."):
+    """Показать ReplyKeyboardMarkup с кнопками навигации."""
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    for btn in NAVIGATION_BUTTONS:
+        markup.add(btn)
+    bot.send_message(chat_id, text, reply_markup=markup)
+
+
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     bot.reply_to(message, 
@@ -1341,6 +1357,7 @@ def send_welcome(message):
         "• 'проверь по ГОСТ 520-2011 диаметр=50'\n"
         "• 'проверь по ГОСТ 3325-85 зазор=0.15'"
     )
+    show_navigation_menu(message.chat.id)
 
 # ============================================================
 #  АВТОРИЗАЦИЯ И РОЛИ
@@ -1352,6 +1369,7 @@ def cmd_login(message):
     user = db.get_user(message.chat.id)
     if user and user.get("approved"):
         bot.reply_to(message, f"✅ Вы уже авторизованы как {user['name']} ({db.ROLE_LABELS.get(user['role'], user['role'])}).")
+        show_navigation_menu(message.chat.id)
         return
     if user and not user.get("approved"):
         bot.reply_to(message, "⏳ Ваша заявка ещё на рассмотрении. Ожидайте одобрения.")
@@ -1826,6 +1844,11 @@ def handle_message(message):
     text_lower = user_text.lower()
     
     if user_text.startswith('/'):
+        return
+    
+    # --- КНОПКИ НАВИГАЦИИ (для всех ролей) ---
+    if user_text.strip() in NAVIGATION_BUTTONS:
+        show_navigation_menu(message.chat.id)
         return
     
     # --- ПРОВЕРКА РОЛИ (интеграция с NLP) ---
