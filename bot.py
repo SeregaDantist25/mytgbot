@@ -14,6 +14,19 @@ import time
 import sqlite3
 import threading
 import db
+from models import init_models, sync_ships_from_json, SessionLocal, User, Ship, RepairStatement, StatementItem, Document
+from file_storage import storage
+import navigation
+import document_commands
+
+# Новые модули для документооборота
+try:
+    import document_manager
+    import bot_handlers_new
+    DOCUMENT_MANAGER_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ Модули документооборота не загружены: {e}")
+    DOCUMENT_MANAGER_AVAILABLE = False
 
 # scanner импортируется лениво (внутри функций), т.к. требует openpyxl,
 # который может отсутствовать на сервере при старте.
@@ -24,6 +37,8 @@ GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 # Секретный код инженера-технолога (задаётся через переменную окружения ENGINEER_CODE)
 ENGINEER_CODE = os.environ.get('ENGINEER_CODE')
 
+# ID администраторов (через запятую), имеющих доступ к /set_role
+ADMIN_IDS = [int(x.strip()) for x in os.environ.get('ADMIN_IDS', '').split(',') if x.strip()]
 if not BOT_TOKEN:
     raise ValueError("Переменная TELEGRAM_BOT_TOKEN не найдена!")
 
@@ -32,7 +47,7 @@ bot.add_custom_filter(custom_filters.StateFilter(bot))
 
 # --- Пути к файлам ---
 TEMPLATES_DIR = "templates"
-DATA_DIR = "data"
+DATA_DIR = os.getenv("DATA_DIR", "data")
 CHECKLISTS_FILE = os.path.join(DATA_DIR, "checklists.json")
 COUNTERS_FILE = os.path.join(DATA_DIR, "counters.json")
 SHIPS_FILE = os.path.join(DATA_DIR, "ships.json")
@@ -886,6 +901,191 @@ def build_defect_table_engine(defects, work_volume):
     return rows
 
 # ============================================================
+#  ФУНКЦИИ ОРМ: НАГРУЖКА РЕМОНТНОЙ ВЕДОМОСТИ
+# ============================================================
+
+def save_repair_items_to_db(ship_id, items):
+    """
+    Сохраняет пункты ремонтной ведомости в БД с дедупликацией.
+    Возвращает: (inserted_count, skipped_count, statement_id)
+    """
+    session = SessionLocal()
+    try:
+        # Создать запись в repair_statements
+        stmt = RepairStatement(ship_id=ship_id, source_excel_file_ref="uploaded")
+        session.add(stmt)
+        session.flush()  # Получить ID
+        statement_id = stmt.id
+        
+        inserted = 0
+        skipped = 0
+        
+        for item in items:
+            # Проверить дубликат (по item_number + section)
+            existing = session.query(StatementItem).filter(
+                StatementItem.statement_id == statement_id,
+                StatementItem.item_number == item.get("item_number"),
+                StatementItem.section == item.get("section")
+            ).first()
+            
+            if existing:
+                skipped += 1
+                continue
+            
+            stmt_item = StatementItem(
+                statement_id=statement_id,
+                item_number=item.get("item_number"),
+                description=item.get("description"),
+                quantity=item.get("quantity"),
+                section=item.get("section"),
+                status="active"
+            )
+            session.add(stmt_item)
+            inserted += 1
+        
+        session.commit()
+        return inserted, skipped, statement_id
+    except Exception as e:
+        session.rollback()
+        raise e
+    finally:
+        session.close()
+
+
+def get_user_role(telegram_id):
+    """Получить роль пользователя из ORM."""
+    session = SessionLocal()
+    try:
+        user = session.query(User).filter_by(telegram_id=telegram_id).first()
+        return user.role if user else "customer"
+    finally:
+        session.close()
+
+
+def can_upload_repair_list(telegram_id):
+    """Проверить, может ли пользователь загружать ремонтную ведомость.
+    Доступно всем, кроме customer.
+    """
+    role = get_user_role(telegram_id)
+    return role != "customer"
+
+
+# ============================================================
+#  ФУНКЦИИ ВЕРСИОНИРОВАНИЯ ДОКУМЕНТОВ
+# ============================================================
+
+def count_drafts_for_item(item_id, category="defect_act_draft"):
+    """Кол-во draft'ов для данного item_id и категории."""
+    session = SessionLocal()
+    try:
+        count = session.query(Document).filter(
+            Document.item_id == item_id,
+            Document.category == category,
+            Document.status == "draft"
+        ).count()
+        return count
+    finally:
+        session.close()
+
+
+def get_oldest_draft(item_id, category="defect_act_draft"):
+    """Получить старейший draft для item_id."""
+    session = SessionLocal()
+    try:
+        doc = session.query(Document).filter(
+            Document.item_id == item_id,
+            Document.category == category,
+            Document.status == "draft"
+        ).order_by(Document.uploaded_at.asc()).first()
+        return doc
+    finally:
+        session.close()
+
+
+def handle_document_approve(document_id, user_id):
+    """
+    Утвердить документ: draft → approved.
+    Возвращает: (success, message)
+    """
+    session = SessionLocal()
+    try:
+        doc = session.query(Document).filter_by(id=document_id).first()
+        if not doc:
+            return False, "❌ Документ не найден"
+        
+        if doc.status != "draft":
+            return False, f"❌ Документ уже {doc.status}"
+        
+        doc.status = "approved"
+        session.commit()
+        return True, f"✅ Документ утверждён"
+    except Exception as e:
+        session.rollback()
+        return False, f"❌ Ошибка: {str(e)}"
+    finally:
+        session.close()
+
+
+def handle_document_archive(document_id, user_id):
+    """
+    Архивировать документ: approved → archived.
+    Только ADMIN_IDS.
+    Возвращает: (success, message)
+    """
+    if user_id not in ADMIN_IDS:
+        return False, "🚫 Только админы могут архивировать документы"
+    
+    session = SessionLocal()
+    try:
+        doc = session.query(Document).filter_by(id=document_id).first()
+        if not doc:
+            return False, "❌ Документ не найден"
+        
+        if doc.status != "approved":
+            return False, f"❌ Можно архивировать только approved документы (текущий: {doc.status})"
+        
+        doc.status = "archived"
+        session.commit()
+        return True, f"✅ Документ архивирован"
+    except Exception as e:
+        session.rollback()
+        return False, f"❌ Ошибка: {str(e)}"
+    finally:
+        session.close()
+
+
+def handle_document_delete(document_id, user_id):
+    """
+    Удалить документ.
+    - draft: любой может удалить
+    - approved: только ADMIN_IDS
+    Возвращает: (success, message)
+    """
+    session = SessionLocal()
+    try:
+        doc = session.query(Document).filter_by(id=document_id).first()
+        if not doc:
+            return False, "❌ Документ не найден"
+        
+        if doc.status == "approved" and user_id not in ADMIN_IDS:
+            return False, "🚫 Только админы могут удалять approved документы"
+        
+        # Удалить файл (FileStorage проверит статус)
+        if doc.file_ref:
+            storage.delete_file(doc.file_ref)
+        
+        # Удалить из БД
+        session.delete(doc)
+        session.commit()
+        return True, f"✅ Документ удалён"
+    except Exception as e:
+        session.rollback()
+        return False, f"❌ Ошибка: {str(e)}"
+    finally:
+        session.close()
+
+
+# ============================================================
 #  ФУНКЦИИ СОЗДАНИЯ ДОКУМЕНТОВ
 # ============================================================
 
@@ -1247,6 +1447,60 @@ def cmd_users(message):
 
 
 # ============================================================
+#  УСТАНОВКА РОЛИ (ADMIN)
+# ============================================================
+
+@bot.message_handler(commands=['set_role'])
+def cmd_set_role(message):
+    """Устанавливает роль пользователю: /set_role <telegram_id> <role>.
+    Доступно только админам (ADMIN_IDS). Роли: technologist, user.
+    """
+    if message.chat.id not in ADMIN_IDS:
+        bot.reply_to(message, "🚫 Команда доступна только администраторам.")
+        return
+    parts = message.text.split()
+    if len(parts) != 3:
+        bot.reply_to(message, "📝 Использование: /set_role <telegram_id> <role>\nРоли: technologist, user")
+        return
+    try:
+        tg_id = int(parts[1])
+    except ValueError:
+        bot.reply_to(message, "❌ telegram_id должен быть числом.")
+        return
+    role = parts[2].strip().lower()
+    if role not in ("technologist", "user"):
+        bot.reply_to(message, "❌ Неизвестная роль. Допустимые: technologist, user")
+        return
+    # Сохраняем роль в таблицу users (новая схема: users.telegram_id)
+    from models import SessionLocal, User
+    session = SessionLocal()
+    try:
+        user = session.query(User).filter(User.telegram_id == tg_id).first()
+        if user:
+            user.role = role
+        else:
+            session.add(User(telegram_id=tg_id, role=role))
+        session.commit()
+        bot.reply_to(message, f"✅ Роль пользователя {tg_id} установлена: {role}")
+    except Exception as e:
+        session.rollback()
+        bot.reply_to(message, f"❌ Ошибка при сохранении роли: {e}")
+    finally:
+        session.close()
+
+
+# ============================================================
+#  НОВЫЕ ОБРАБОТЧИКИ: ДОКУМЕНТООБОРОТ И НАВИГАЦИЯ
+# ============================================================
+
+if DOCUMENT_MANAGER_AVAILABLE:
+    # Регистрируем обработчики загрузки ремонтной ведомости
+    bot_handlers_new.register_upload_handlers(bot)
+    # Регистрируем обработчики навигации
+    bot_handlers_new.register_navigation_handlers(bot)
+
+
+# ============================================================
 #  СКАНИРОВАНИЕ ПАПКИ repair_docs
 # ============================================================
 
@@ -1264,6 +1518,64 @@ def cmd_scan(message):
         bot.send_message(message.chat.id, m)
     # Уведомляем инженера/директоров о договорах на утверждение
     notify_contracts_for_approval()
+
+
+@bot.message_handler(content_types=['document'])
+def handle_repair_list_upload(message):
+    """
+    Обработчик загрузки Excel-файла с ремонтной ведомостью.
+    Доступно всем, кроме customer.
+    """
+    if not can_upload_repair_list(message.chat.id):
+        bot.reply_to(message, "🚫 У вас нет прав на загрузку ремонтной ведомости.")
+        return
+    
+    file_info = bot.get_file(message.document.file_id)
+    file_path = file_info.file_path
+    downloaded_file = bot.download_file(file_path)
+    
+    # Сохранить временный файл
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        tmp.write(downloaded_file)
+        tmp_path = tmp.name
+    
+    try:
+        import scanner
+        items = scanner.parse_repair_list(tmp_path)
+        if not items:
+            bot.reply_to(message, "⚠️ В файле не найдено пунктов ремонтной ведомости.")
+            return
+        
+        # Получить судно из имени файла или спросить
+        filename = message.document.file_name or "unknown"
+        ship_name = scanner.detect_ship_from_filename(filename)
+        
+        if not ship_name:
+            bot.reply_to(message, "❌ Не удалось определить судно из имени файла. Используйте формат: Ремведомость_<Судно>.xlsx")
+            return
+        
+        # Найти судно в БД
+        session = SessionLocal()
+        try:
+            ship = session.query(Ship).filter_by(name=ship_name).first()
+            if not ship:
+                bot.reply_to(message, f"❌ Судно '{ship_name}' не найдено в базе. Добавьте его сначала.")
+                return
+            
+            # Сохранить пункты в БД
+            inserted, skipped, stmt_id = save_repair_items_to_db(ship.id, items)
+            bot.reply_to(message, 
+                f"✅ Ремонтная ведомость загружена для судна '{ship_name}'\n"
+                f"📝 Добавлено: {inserted} пунктов\n"
+                f"⏭️ Пропущено (дубликаты): {skipped}")
+        finally:
+            session.close()
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка при обработке файла: {str(e)}")
+    finally:
+        import os
+        os.unlink(tmp_path)
 
 
 def notify_contracts_for_approval():
@@ -1432,6 +1744,68 @@ def search_gosts(message):
     bot.reply_to(message, response, parse_mode='Markdown')
 
 # ============================================================
+#  ОБРАБОТЧИКИ CALLBACK'OB (НАВИГАЦИЯ)
+# ============================================================
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('section_'))
+def handle_section_callback(call):
+    """Обработчик выбора раздела."""
+    parts = call.data.split('_')
+    if len(parts) < 3:
+        return
+    
+    ship_id = int(parts[1])
+    section_hash = parts[2]
+    
+    # Найти раздел по хешу (все разделы для судна)
+    sections = navigation.get_sections_for_ship(ship_id)
+    section = None
+    for s in sections:
+        if str(hash(s) & 0x7fffffff) == section_hash:
+            section = s
+            break
+    
+    if not section:
+        bot.answer_callback_query(call.id, "❌ Раздел не найден")
+        return
+    
+    # Показать пункты в разделе
+    keyboard = navigation.build_items_keyboard(ship_id, section, page=0)
+    if not keyboard:
+        bot.answer_callback_query(call.id, "⚠️ В этом разделе нет пунктов")
+        return
+    
+    text = f"📄 **Раздел:** {section}\n\nВыберите пункт:"
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, 
+                         reply_markup=keyboard, parse_mode='Markdown')
+    bot.answer_callback_query(call.id)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('item_'))
+def handle_item_callback(call):
+    """Обработчик выбора пункта."""
+    parts = call.data.split('_')
+    if len(parts) < 2:
+        return
+    
+    item_id = int(parts[1])
+    item = navigation.get_item_details(item_id)
+    
+    if not item:
+        bot.answer_callback_query(call.id, "❌ Пункт не найден")
+        return
+    
+    text = navigation.format_item_details(item)
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(types.InlineKeyboardButton("📄 Загрузить документ", callback_data=f"upload_doc_{item_id}"))
+    keyboard.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="back_to_sections"))
+    
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
+                         reply_markup=keyboard, parse_mode='Markdown')
+    bot.answer_callback_query(call.id)
+
+
+# ============================================================
 #  ГЛАВНЫЙ ОБРАБОТЧИК (ЧЕРЕЗ АЛИСУ)
 # ============================================================
 
@@ -1446,7 +1820,14 @@ def handle_message(message):
     if user_text.startswith('/'):
         return
     
-    # --- РЕГИСТРАЦИЯ НОВОГО ПОЛЬЗОВАТЕЛЯ ---
+    # --- ПРОВЕРКА РОЛИ (интеграция с NLP) ---
+    # Только engineer_technologist и админы могут использовать NLP-режим
+    role = get_user_role(message.chat.id)
+    if message.chat.id not in ADMIN_IDS and role != "engineer_technologist":
+        bot.reply_to(message, "📄 Отправьте документы или используйте кнопки для навигации.")
+        return
+    
+    # --- РЕГИСТРАЦИЯ НОВОГО ПОЛьЗОВАТЕЛЯ ---
     reg_step = get_chat_state(message.chat.id, "reg_step")
     if reg_step:
         if reg_step == "name":
@@ -1516,6 +1897,23 @@ def handle_message(message):
             "Введите /login для регистрации или входа."
         )
         return
+
+    # --- ПРОВЕРКА РОЛИ (НОВОЕ) ---
+    # Если пользователь customer → показать меню
+    if DOCUMENT_MANAGER_AVAILABLE:
+        user_role = document_manager.get_user_role(message.chat.id)
+        if user_role == document_manager.ROLE_CUSTOMER:
+            from telebot import types
+            markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            markup.add("📋 Ремонтная ведомость")
+            markup.add("📄 Документы")
+            markup.add("🚢 Суда")
+            bot.send_message(
+                message.chat.id,
+                "👋 Используйте кнопки для навигации.",
+                reply_markup=markup
+            )
+            return
 
     # --- ОБРАБОТКА УТОЧНЕНИЯ ОСНОВАНИЯ АКТА ---
     pending = get_chat_state(message.chat.id, "pending_act")
@@ -2007,6 +2405,17 @@ if __name__ == '__main__':
                 print(f"   • {section}: {count}")
     else:
         print("⚠️ ГОСТ чекер не загружен")
+    
+    # Инициализация ORM и синхронизация судов
+    init_models()
+    ships_data = load_ships()
+    if ships_data:
+        sync_ships_from_json(ships_data)
+    
+    # Регистрация команд управления документами
+    document_commands.register_document_commands(
+        bot, ADMIN_IDS, handle_document_approve, handle_document_archive, handle_document_delete
+    )
     
     # Периодическое сканирование папки repair_docs
     start_scan_timer()
