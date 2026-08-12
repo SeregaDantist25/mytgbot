@@ -279,7 +279,17 @@ def register_navigation_handlers(bot):
 
         _show_ships_menu(bot, message.chat.id)
 
-    # Reply-кнопки навигации (отправляют обычный текст)
+    @bot.message_handler(commands=['scan_acts'])
+    def cmd_scan_acts(message):
+        """Импортировать готовые акты дефектации из папки acts/."""
+        try:
+            import act_importer
+            messages = act_importer.import_acts()
+            bot.reply_to(message, "\n".join(messages))
+        except Exception as e:
+            logger.error(f"Ошибка импорта актов: {e}", exc_info=True)
+            bot.reply_to(message, f"❌ Ошибка при импорте актов: {e}")
+
     @bot.message_handler(func=lambda message: message.text in ("📋 Ремонтная ведомость", "🚢 Суда"))
     def handle_nav_repair_list(message):
         """Кнопки «Ремонтная ведомость» и «Суда» → список судов."""

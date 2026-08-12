@@ -66,6 +66,63 @@ class FileStorage:
         """
         return self.storage_backend.save(path, file_data)
 
+    def save_document(self, file_name, file_content, item_id, category, user_id=None):
+        """
+        Сохраняет файл документа в DATA_DIR/documents/<item_id>/<category>/ и
+        создаёт запись в БД (Document).
+
+        Возвращает dict {"success": bool, "document_id": int|None, "file_ref": str|None, "message": str}.
+        """
+        import os
+        from datetime import datetime
+        from models import SessionLocal, Document
+
+        file_type = os.path.splitext(file_name)[1].lower()
+        # Относительный путь внутри DATA_DIR
+        rel_dir = os.path.join("documents", str(item_id), category)
+        rel_path = os.path.join(rel_dir, file_name)
+
+        # Если файл с таким именем уже есть — добавляем суффикс времени
+        abs_path = self._abs(rel_path)
+        if os.path.exists(abs_path):
+            base, ext = os.path.splitext(file_name)
+            rel_path = os.path.join(rel_dir, f"{base}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}")
+
+        self.storage_backend.save(rel_path, file_content)
+
+        session = SessionLocal()
+        try:
+            doc = Document(
+                item_id=item_id,
+                category=category,
+                file_ref=rel_path,
+                file_type=file_type,
+                status="draft",
+                uploaded_by=user_id,
+                version=1,
+            )
+            session.add(doc)
+            session.commit()
+            return {
+                "success": True,
+                "document_id": doc.id,
+                "file_ref": rel_path,
+                "message": "Документ сохранён",
+            }
+        except Exception as e:
+            session.rollback()
+            return {
+                "success": False,
+                "document_id": None,
+                "file_ref": None,
+                "message": f"Ошибка при сохранении в БД: {e}",
+            }
+        finally:
+            session.close()
+
+    def _abs(self, rel_path):
+        return self.storage_backend._abs(rel_path)
+
     def get_file(self, path):
         """Возвращает содержимое файла (bytes)."""
         return self.storage_backend.read(path)

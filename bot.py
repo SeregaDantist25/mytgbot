@@ -209,6 +209,15 @@ if __name__ == '__main__':
         except Exception as e:
             logger.warning(f"[AUTO] Ошибка автозагрузки ведомости: {e}")
 
+    # Автоимпорт готовых актов дефектации из папки acts/
+    if bot_context.DOCUMENT_MANAGER_AVAILABLE:
+        try:
+            import act_importer
+            for m in act_importer.import_acts():
+                logger.info(f"[ACTS] {m}")
+        except Exception as e:
+            logger.warning(f"[ACTS] Ошибка автоимпорта актов: {e}")
+
     # Регистрация команд управления документами
     from services.extra import handle_document_approve, handle_document_archive, handle_document_delete
     document_commands.register_document_commands(
