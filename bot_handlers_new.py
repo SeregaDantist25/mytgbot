@@ -456,7 +456,7 @@ def register_navigation_handlers(bot):
         
         # Кнопки действий
         markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("📤 Загрузить документ", callback_data=f"upload_doc_{item_id}"))
+        markup.add(types.InlineKeyboardButton("📤 Загрузить документ", callback_data=f"upload_{item_id}"))
         # Назад к списку пунктов раздела (с контекстом судна и раздела)
         ship_id = dm.get_ship_id_for_item(item_id)
         section_hash = dm.section_hash(item['section']) if item['section'] else ""

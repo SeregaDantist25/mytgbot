@@ -21,7 +21,7 @@ def register_document_handlers(bot):
     # Загрузка документа
     # ========================================================================
     
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("upload_"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("upload_") and call.data.split("_")[1].isdigit())
     def handle_upload_button(call):
         """Обработчик кнопки 'Загрузить документ'."""
         try:
