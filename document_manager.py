@@ -170,6 +170,68 @@ def save_repair_items_to_db(ship_id, items):
 #  ПЛАН 2: НАВИГАЦИЯ ПО ПУНКТАМ
 # ============================================================
 
+def ensure_repair_list_loaded(ship_name, source_path):
+    """Загрузить ремонтную ведомость судна, если её ещё нет в БД.
+
+    Используется при старте бота: если для судна нет ни одного
+    RepairStatement, парсит исходный Excel и сохраняет пункты.
+    Возвращает (bool, str): (успех, сообщение).
+    """
+    session = SessionLocal()
+    try:
+        ship = session.query(Ship).filter_by(name=ship_name).first()
+        if not ship:
+            return False, f"Судно «{ship_name}» не найдено"
+
+        has_statement = session.query(RepairStatement).filter_by(ship_id=ship.id).first()
+        if has_statement:
+            return False, f"Ведомость «{ship_name}» уже загружена"
+
+        if not os.path.exists(source_path):
+            return False, f"Исходный файл не найден: {source_path}"
+
+        import scanner
+        items = scanner.parse_repair_list(source_path)
+        if not items:
+            return False, f"В файле {source_path} нет пунктов"
+
+        ex = scanner.parse_exclusions(source_path)
+        result = scanner.apply_exclusions(items, ex)
+
+        # Пунктам без раздела назначаем «Основные работы»
+        for it in result:
+            if not it.get("section"):
+                it["section"] = "Основные работы"
+
+        statement = RepairStatement(
+            ship_id=ship.id,
+            source_excel_file_ref=os.path.basename(source_path),
+        )
+        session.add(statement)
+        session.flush()
+
+        created = 0
+        for it in result:
+            item = StatementItem(
+                statement_id=statement.id,
+                item_number=it["item_number"],
+                description=it["description"],
+                quantity=it.get("quantity"),
+                section=it.get("section"),
+                status=it.get("status", "active"),
+            )
+            session.add(item)
+            created += 1
+
+        session.commit()
+        return True, f"Загружено {created} пунктов для «{ship_name}»"
+    except Exception as e:
+        session.rollback()
+        return False, f"Ошибка загрузки ведомости «{ship_name}»: {e}"
+    finally:
+        session.close()
+
+
 def get_sections_for_ship(ship_id):
     """Получить список уникальных разделов для судна."""
     session = SessionLocal()

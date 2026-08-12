@@ -194,6 +194,21 @@ if __name__ == '__main__':
     if ships_data:
         sync_ships_from_json(ships_data)
 
+    # Автозагрузка ремонтной ведомости «Славянская», если её ещё нет в БД
+    if bot_context.DOCUMENT_MANAGER_AVAILABLE:
+        try:
+            import document_manager as dm
+            slavyanskaya_src = os.path.join(
+                "repair_docs", "_processed", "Ремведомость_Славянская осн..xlsx"
+            )
+            ok, msg = dm.ensure_repair_list_loaded("Славянская", slavyanskaya_src)
+            if ok:
+                logger.info(f"[AUTO] {msg}")
+            else:
+                logger.info(f"[AUTO] {msg}")
+        except Exception as e:
+            logger.warning(f"[AUTO] Ошибка автозагрузки ведомости: {e}")
+
     # Регистрация команд управления документами
     from services.extra import handle_document_approve, handle_document_archive, handle_document_delete
     document_commands.register_document_commands(
