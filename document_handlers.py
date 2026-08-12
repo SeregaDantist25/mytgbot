@@ -109,7 +109,7 @@ def register_document_handlers(bot):
             downloaded_file = bot.download_file(file_info.file_path)
             
             # Сохраняем в хранилище
-            file_path = storage.save_file(
+            result = storage.save_document(
                 file_name=file_name,
                 file_content=downloaded_file,
                 item_id=item_id,
@@ -120,7 +120,11 @@ def register_document_handlers(bot):
             # Выходим из состояния
             bot.delete_state(message.from_user.id)
             
-            bot.reply_to(message, f"✅ Документ загружен успешно!\n📁 {file_name}")
+            if result["success"]:
+                bot.reply_to(message, f"✅ Документ загружен успешно!\n📁 {file_name}")
+            else:
+                bot.reply_to(message, f"❌ Ошибка: {result['message']}")
+
             
         except Exception as e:
             bot.reply_to(message, f"❌ Ошибка при загрузке: {str(e)}")
@@ -194,35 +198,21 @@ def register_document_handlers(bot):
             # Скачиваем файл
             downloaded_file = bot.download_file(file_info.file_path)
             
-            # Удаляем старый файл
-            session = SessionLocal()
-            doc = session.query(Document).filter_by(id=doc_id).first()
-            if doc and doc.file_ref:
-                try:
-                    storage.delete_file(doc.file_ref)
-                except Exception as e:
-                    logger.warning(f"Failed to delete old file {doc.file_ref}: {e}")
-            
-            # Сохраняем новый файл с тем же item_id и category, но новым содержимым
-            file_path = storage.save_file(
-                file_name=file_name,
-                file_content=downloaded_file,
-                item_id=item_id,
-                category=category,
-                user_id=message.from_user.id,
-                replace_doc_id=doc_id  # Указываем, что это замена
+            # Заменяем документ
+            result = storage.replace_document(
+                document_id=doc_id,
+                new_file_content=downloaded_file,
+                new_file_name=file_name
             )
-            
-            # Обновляем документ в БД
-            doc.file_ref = file_path
-            doc.file_type = file_type
-            session.commit()
-            session.close()
             
             # Выходим из состояния
             bot.delete_state(message.from_user.id)
             
-            bot.reply_to(message, f"✅ Документ заменён успешно!\n📁 {file_name}")
+            if result["success"]:
+                bot.reply_to(message, f"✅ Документ заменён успешно!\n📁 {file_name}")
+            else:
+                bot.reply_to(message, f"❌ Ошибка: {result['message']}")
+
             
         except Exception as e:
             bot.reply_to(message, f"❌ Ошибка при замене: {str(e)}")

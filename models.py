@@ -23,8 +23,9 @@ from sqlalchemy import (
     DateTime,
     func,
     create_engine,
+    LargeBinary,
 )
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 
 # Строка подключения. По умолчанию — та же SQLite-база, что использует db.py.
 # Для PostgreSQL: postgresql+psycopg2://user:pass@host:5432/dbname
@@ -120,6 +121,7 @@ class Document(Base):
     status = Column(String, default="draft", index=True)
     uploaded_by = Column(BigInteger, ForeignKey("users.telegram_id"))
     uploaded_at = Column(DateTime, server_default=func.now())
+    file_data = Column(LargeBinary)  # Содержимое файла (для PostgreSQL/Railway)
 
     item = relationship("StatementItem", back_populates="documents")
     uploader = relationship("User", back_populates="documents")

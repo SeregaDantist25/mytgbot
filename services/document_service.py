@@ -35,20 +35,18 @@ def create_document(
     Returns:
         Созданный объект Document.
     """
-    file_ref = storage.save_file(file_data, f"documents/{item_id}/{category}")
+    result = storage.save_document(
+        file_name=f'document{file_type or ".bin"}',
+        file_content=file_data,
+        item_id=item_id,
+        category=category,
+        user_id=user_id
+    )
+    if not result["success"]:
+        return None
     session = SessionLocal()
     try:
-        doc = Document(
-            item_id=item_id,
-            category=category,
-            file_ref=file_ref,
-            file_type=file_type,
-            uploaded_by=user_id,
-            status="draft",
-            version=1,
-        )
-        session.add(doc)
-        session.commit()
+        doc = session.query(Document).filter_by(id=result["document_id"]).first()
         return doc
     finally:
         session.close()
@@ -219,7 +217,15 @@ def replace_document(
             return False, "❌ Можно заменять только черновики"
         if doc.file_ref:
             storage.delete_file(doc.file_ref)
-        new_ref = storage.save_file(file_data, f"documents/{doc.item_id}/{doc.category}")
+        result = storage.replace_document(
+            document_id=document_id,
+            new_file_content=file_data,
+            new_file_name=None
+        )
+        if result['success']:
+            new_ref = doc.file_ref
+        else:
+            return None
         doc.file_ref = new_ref
         doc.file_type = file_type
         session.commit()
