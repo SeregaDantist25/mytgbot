@@ -346,6 +346,7 @@ def get_item_details(item_id):
                     "file_ref": doc.file_ref,
                     "status": doc.status,
                     "version": doc.version,
+                    "source": doc.source or "bot",
                 }
                 for doc in documents
             ]

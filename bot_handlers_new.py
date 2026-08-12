@@ -460,7 +460,8 @@ def register_navigation_handlers(bot):
         if item['documents']:
             msg += "📄 Документы:\n"
             for doc in item['documents']:
-                msg += f"  • {doc['category']} (статус: {doc['status']}, v{doc['version']})\n"
+                src = "📁 из папки" if doc.get('source') == "folder" else "📤 через бота"
+                msg += f"  • {doc['category']} ({src}, статус: {doc['status']}, v{doc['version']})\n"
         else:
             msg += "📄 Документов нет\n"
         

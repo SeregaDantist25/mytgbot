@@ -41,7 +41,7 @@ class FileStorage:
             f.write(file_data)
         return path
 
-    def save_document(self, file_name, file_content, item_id, category, user_id=None):
+    def save_document(self, file_name, file_content, item_id, category, user_id=None, source="bot"):
         """
         Сохраняет файл документа в БД (и на диск для SQLite).
         
@@ -51,6 +51,7 @@ class FileStorage:
             item_id: ID пункта ведомости (int)
             category: категория документа (str)
             user_id: telegram_id загружающего пользователя (int)
+            source: источник документа — "bot" (загрузка через бота) или "folder" (импорт из папки)
         
         Returns:
             dict {"success": bool, "document_id": int|None, "file_ref": str|None, "message": str}
@@ -92,6 +93,7 @@ class FileStorage:
                 uploaded_by=user_id,
                 version=1,
                 file_data=file_content,  # Сохраняем содержимое в БД
+                source=source,
             )
             session.add(doc)
             session.commit()

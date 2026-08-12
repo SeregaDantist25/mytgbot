@@ -133,6 +133,7 @@ def import_acts():
                     item_id=item.id,
                     category="defect_act",
                     user_id=None,
+                    source="folder",
                 )
 
                 if result["success"]:
