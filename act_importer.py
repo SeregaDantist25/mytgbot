@@ -20,10 +20,8 @@ import time
 from models import SessionLocal, Ship, RepairStatement, StatementItem
 from file_storage import storage
 
-ACTS_DIR = "acts"
+ACTS_DIR = os.getenv("ACTS_DIR", "acts")
 PROCESSED_DIR = os.path.join(ACTS_DIR, "_processed")
-
-# Допустимые расширения
 ALLOWED_EXT = (".docx", ".xlsx", ".pdf")
 
 
