@@ -309,6 +309,19 @@ def get_items_for_section(ship_id, section):
         session.close()
 
 
+def get_ship_id_for_item(item_id):
+    """Вернуть ship_id, к которому относится пункт ремонтной ведомости."""
+    session = SessionLocal()
+    try:
+        item = session.query(StatementItem).filter_by(id=item_id).first()
+        if not item:
+            return None
+        statement = session.query(RepairStatement).filter_by(id=item.statement_id).first()
+        return statement.ship_id if statement else None
+    finally:
+        session.close()
+
+
 def get_item_details(item_id):
     """Получить детали пункта ремонтной ведомости."""
     session = SessionLocal()
