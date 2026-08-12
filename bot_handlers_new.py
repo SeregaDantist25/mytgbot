@@ -276,10 +276,13 @@ def register_navigation_handlers(bot):
         page_data = dm.paginate_list(sections, page=0, page_size=10)
         
         markup = types.InlineKeyboardMarkup()
-        for section in page_data["items"]:
+        page_size = 10
+        for i, section in enumerate(page_data["items"]):
+            # Глобальный индекс раздела в полном списке (с учётом пагинации)
+            section_index = page_data["page"] * page_size + i
             btn = types.InlineKeyboardButton(
                 text=section or "Без раздела",
-                callback_data=f"section_{ship_id}_{len(section)}"  # используем длину как ID раздела
+                callback_data=f"section_{ship_id}_{section_index}"
             )
             markup.add(btn)
         
