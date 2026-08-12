@@ -33,9 +33,12 @@ from models import (
     Ship,
     RepairStatement,
     StatementItem,
-    Document,
 )
-from file_storage import storage
+from services.document_service import (
+    approve_document,
+    archive_document,
+    delete_document,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -993,54 +996,12 @@ def can_upload_repair_list(telegram_id: int) -> bool:
 #  ФУНКЦИИ ВЕРСИОНИРОВАНИЯ ДОКУМЕНТОВ
 # ============================================================
 
-def count_drafts_for_item(item_id: int, category: str = "defect_act_draft") -> int:
-    """Кол-во draft'ов для данного item_id и категории."""
-    session = SessionLocal()
-    try:
-        count = session.query(Document).filter(
-            Document.item_id == item_id,
-            Document.category == category,
-            Document.status == "draft",
-        ).count()
-        return count
-    finally:
-        session.close()
-
-
-def get_oldest_draft(item_id: int, category: str = "defect_act_draft"):
-    """Получить старейший draft для item_id."""
-    session = SessionLocal()
-    try:
-        doc = session.query(Document).filter(
-            Document.item_id == item_id,
-            Document.category == category,
-            Document.status == "draft",
-        ).order_by(Document.uploaded_at.asc()).first()
-        return doc
-    finally:
-        session.close()
-
-
 def handle_document_approve(document_id: int, user_id: int) -> tuple:
     """
     Утвердить документ: draft → approved.
     Возвращает: (success, message)
     """
-    session = SessionLocal()
-    try:
-        doc = session.query(Document).filter_by(id=document_id).first()
-        if not doc:
-            return False, "❌ Документ не найден"
-        if doc.status != "draft":
-            return False, f"❌ Документ уже {doc.status}"
-        doc.status = "approved"
-        session.commit()
-        return True, "✅ Документ утверждён"
-    except Exception as e:
-        session.rollback()
-        return False, f"❌ Ошибка: {str(e)}"
-    finally:
-        session.close()
+    return approve_document(document_id, user_id)
 
 
 def handle_document_archive(document_id: int, user_id: int, admin_ids: list | None = None) -> tuple:
@@ -1049,25 +1010,7 @@ def handle_document_archive(document_id: int, user_id: int, admin_ids: list | No
     Только ADMIN_IDS.
     Возвращает: (success, message)
     """
-    admin_ids = admin_ids or []
-    if user_id not in admin_ids:
-        return False, "🚫 Только админы могут архивировать документы"
-
-    session = SessionLocal()
-    try:
-        doc = session.query(Document).filter_by(id=document_id).first()
-        if not doc:
-            return False, "❌ Документ не найден"
-        if doc.status != "approved":
-            return False, f"❌ Можно архивировать только approved документы (текущий: {doc.status})"
-        doc.status = "archived"
-        session.commit()
-        return True, "✅ Документ архивирован"
-    except Exception as e:
-        session.rollback()
-        return False, f"❌ Ошибка: {str(e)}"
-    finally:
-        session.close()
+    return archive_document(document_id, user_id, admin_ids)
 
 
 def handle_document_delete(document_id: int, user_id: int, admin_ids: list | None = None) -> tuple:
@@ -1077,24 +1020,7 @@ def handle_document_delete(document_id: int, user_id: int, admin_ids: list | Non
     - approved: только ADMIN_IDS
     Возвращает: (success, message)
     """
-    admin_ids = admin_ids or []
-    session = SessionLocal()
-    try:
-        doc = session.query(Document).filter_by(id=document_id).first()
-        if not doc:
-            return False, "❌ Документ не найден"
-        if doc.status == "approved" and user_id not in admin_ids:
-            return False, "🚫 Только админы могут удалять approved документы"
-        if doc.file_ref:
-            storage.delete_file(doc.file_ref)
-        session.delete(doc)
-        session.commit()
-        return True, "✅ Документ удалён"
-    except Exception as e:
-        session.rollback()
-        return False, f"❌ Ошибка: {str(e)}"
-    finally:
-        session.close()
+    return delete_document(document_id, user_id, admin_ids)
 
 
 # Экземпляр базы данных насосов (для обратной совместимости)

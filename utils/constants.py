@@ -11,7 +11,8 @@ from enum import Enum
 
 class UserRole(str, Enum):
     """Роли пользователей бота."""
-    ENGINEER = "engineer_technologist"
+    ENGINEER = "engineer"
+    ENGINEER_TECHNOLOGIST = "engineer_technologist"
     DIRECTOR = "director"
     BUILDER = "builder"
     CUSTOMER = "customer"

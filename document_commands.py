@@ -4,10 +4,14 @@
 Импортируется в bot.py.
 """
 
+from utils.decorators import require_role
+
+
 def register_document_commands(bot, ADMIN_IDS, handle_document_approve, handle_document_archive, handle_document_delete):
     """Регистрирует команды управления документами."""
     
     @bot.message_handler(commands=['approve_doc'])
+    @require_role(['engineer', 'director', 'builder'])
     def cmd_approve_doc(message):
         """Утвердить черновик: /approve_doc <doc_id>"""
         parts = message.text.split()
@@ -26,6 +30,7 @@ def register_document_commands(bot, ADMIN_IDS, handle_document_approve, handle_d
     
     
     @bot.message_handler(commands=['archive_doc'])
+    @require_role(['engineer', 'director'])
     def cmd_archive_doc(message):
         """Архивировать документ: /archive_doc <doc_id>"""
         parts = message.text.split()
@@ -44,6 +49,7 @@ def register_document_commands(bot, ADMIN_IDS, handle_document_approve, handle_d
     
     
     @bot.message_handler(commands=['delete_doc'])
+    @require_role(['engineer', 'director', 'builder'])
     def cmd_delete_doc(message):
         """Удалить документ: /delete_doc <doc_id>"""
         parts = message.text.split()

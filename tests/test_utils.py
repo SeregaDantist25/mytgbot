@@ -18,7 +18,7 @@ class TestUserRole:
     """Тесты Enum UserRole."""
 
     def test_values(self):
-        assert UserRole.ENGINEER.value == "engineer_technologist"
+        assert UserRole.ENGINEER.value == "engineer"
         assert UserRole.DIRECTOR.value == "director"
         assert UserRole.BUILDER.value == "builder"
         assert UserRole.CUSTOMER.value == "customer"

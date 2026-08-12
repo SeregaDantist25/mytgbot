@@ -50,6 +50,7 @@ class User(Base):
 
     Роли:
     - engineer: инженер-технолог (абсолютные права)
+    - engineer_technologist: синоним инженера-технолога (обратная совместимость)
     - director: директор
     - builder: строитель
     - customer: заказчик
@@ -59,8 +60,37 @@ class User(Base):
 
     telegram_id = Column(BigInteger, primary_key=True)
     role = Column(String, nullable=False, default="customer")
+    name = Column(String)
+    phone = Column(String)
+    approved = Column(Integer, default=0)
 
     documents = relationship("Document", back_populates="uploader")
+
+
+class PendingUser(Base):
+    """Заявка на регистрацию пользователя."""
+
+    __tablename__ = "pending_users"
+
+    user_id = Column(BigInteger, primary_key=True)
+    name = Column(String, nullable=False)
+    role_requested = Column(String, nullable=False)
+    phone = Column(String)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class AuditLog(Base):
+    """Журнал действий пользователей."""
+
+    __tablename__ = "audit_log"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger)
+    action = Column(String, nullable=False)
+    ship_id = Column(Integer)
+    doc_id = Column(Integer)
+    details = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
 
 
 class Ship(Base):
@@ -133,6 +163,9 @@ def init_models():
     Base.metadata.create_all(engine)
     _ensure_column("documents", "source", "VARCHAR DEFAULT 'bot'")
     _ensure_column("documents", "file_data", "BLOB")
+    _ensure_column("users", "name", "VARCHAR")
+    _ensure_column("users", "phone", "VARCHAR")
+    _ensure_column("users", "approved", "INTEGER DEFAULT 0")
 
 
 def _ensure_column(table, column, ddl_type):

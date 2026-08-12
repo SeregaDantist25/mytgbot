@@ -9,7 +9,7 @@ User (models.py). Обратная совместимость с bot.py сохр
 
 from typing import List, Optional
 
-from models import SessionLocal, User
+from models import SessionLocal, User, PendingUser, AuditLog
 
 
 def get_user(user_id: int) -> Optional[User]:
@@ -28,20 +28,22 @@ def get_user(user_id: int) -> Optional[User]:
         session.close()
 
 
-def create_user(user_id: int, name: str, role: str) -> User:
+def create_user(user_id: int, name: str, role: str, phone: str = None, approved: int = 0) -> User:
     """Создаёт пользователя.
 
     Args:
         user_id: Telegram ID пользователя.
         name: Имя пользователя.
         role: Роль пользователя.
+        phone: Телефон (опционально).
+        approved: Флаг одобрения (0/1).
 
     Returns:
         Созданный объект User.
     """
     session = SessionLocal()
     try:
-        user = User(telegram_id=user_id, role=role)
+        user = User(telegram_id=user_id, role=role, name=name, phone=phone, approved=approved)
         session.add(user)
         session.commit()
         return user
@@ -117,5 +119,109 @@ def update_user_role(user_id: int, new_role: str) -> bool:
         user.role = new_role
         session.commit()
         return True
+    finally:
+        session.close()
+
+
+# ============================================================
+#  РОЛИ И ПРАВА
+# ============================================================
+
+ROLE_ENGINEER = "engineer"
+ROLE_DIRECTOR = "director"
+ROLE_BUILDER = "builder"
+ROLE_CUSTOMER = "customer"
+
+ROLE_LABELS = {
+    ROLE_ENGINEER: "Инженер-технолог",
+    ROLE_DIRECTOR: "Директор",
+    ROLE_BUILDER: "Строитель",
+    ROLE_CUSTOMER: "Заказчик",
+}
+
+
+def is_engineer(user) -> bool:
+    return bool(user) and user.role == ROLE_ENGINEER
+
+
+def is_director(user) -> bool:
+    return bool(user) and user.role == ROLE_DIRECTOR
+
+
+def is_builder(user) -> bool:
+    return bool(user) and user.role == ROLE_BUILDER
+
+
+def is_customer(user) -> bool:
+    return bool(user) and user.role == ROLE_CUSTOMER
+
+
+def can_approve_users(user) -> bool:
+    """Кто может одобрять новых пользователей."""
+    return bool(user) and (is_engineer(user) or is_director(user))
+
+
+def get_user_role(telegram_id: int) -> str:
+    """Возвращает роль пользователя (или customer, если не найден)."""
+    user = get_user(telegram_id)
+    return user.role if user else ROLE_CUSTOMER
+
+
+# ============================================================
+#  ЗАЯВКИ НА РЕГИСТРАЦИЮ
+# ============================================================
+
+def add_pending_user(user_id: int, name: str, role: str, phone: str = None) -> None:
+    session = SessionLocal()
+    try:
+        pending = session.query(PendingUser).filter_by(user_id=user_id).first()
+        if pending:
+            pending.name = name
+            pending.role_requested = role
+            pending.phone = phone
+        else:
+            session.add(PendingUser(user_id=user_id, name=name, role_requested=role, phone=phone))
+        session.commit()
+    finally:
+        session.close()
+
+
+def get_pending_users() -> list:
+    session = SessionLocal()
+    try:
+        rows = session.query(PendingUser).order_by(PendingUser.created_at).all()
+        return [
+            {
+                "user_id": p.user_id,
+                "name": p.name,
+                "role_requested": p.role_requested,
+                "phone": p.phone,
+            }
+            for p in rows
+        ]
+    finally:
+        session.close()
+
+
+def remove_pending_user(user_id: int) -> None:
+    session = SessionLocal()
+    try:
+        pending = session.query(PendingUser).filter_by(user_id=user_id).first()
+        if pending:
+            session.delete(pending)
+            session.commit()
+    finally:
+        session.close()
+
+
+# ============================================================
+#  ЖУРНАЛ ДЕЙСТВИЙ
+# ============================================================
+
+def log_action(user_id: int, action: str, ship_id: int = None, doc_id: int = None, details: str = None) -> None:
+    session = SessionLocal()
+    try:
+        session.add(AuditLog(user_id=user_id, action=action, ship_id=ship_id, doc_id=doc_id, details=details))
+        session.commit()
     finally:
         session.close()
