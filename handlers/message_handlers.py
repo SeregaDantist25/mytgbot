@@ -497,12 +497,6 @@ def notify_contracts_for_approval() -> None:
         if user_text.startswith('/'):
             return
 
-        # --- ПРОВЕРКА РОЛИ (интеграция с NLP) ---
-        role = get_user_role(message.chat.id)
-        if message.chat.id not in bot_context.ADMIN_IDS and role not in ("engineer", "engineer_technologist"):
-            bot.reply_to(message, "📄 Отправьте документы или используйте кнопки для навигации.")
-            return
-
         # --- РЕГИСТРАЦИЯ НОВОГО ПОЛЬЗОВАТЕЛЯ ---
         reg_step = get_chat_state(message.chat.id, "reg_step")
         if reg_step:
@@ -567,6 +561,12 @@ def notify_contracts_for_approval() -> None:
                 "🔒 Для работы с ботом необходимо авторизоваться.\n"
                 "Введите /login для регистрации или входа.",
             )
+            return
+
+        # --- ПРОВЕРКА РОЛИ (интеграция с NLP) ---
+        role = get_user_role(message.chat.id)
+        if message.chat.id not in bot_context.ADMIN_IDS and role not in ("engineer", "engineer_technologist"):
+            bot.reply_to(message, "📄 Отправьте документы или используйте кнопки для навигации.")
             return
 
         # --- ПРОВЕРКА РОЛИ (НОВОЕ) ---
