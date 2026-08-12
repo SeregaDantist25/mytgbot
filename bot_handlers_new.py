@@ -222,6 +222,49 @@ def _show_ships_menu(bot, chat_id):
         session.close()
 
 
+def _show_sections(bot, call, ship_id, page=0):
+    """Показать список разделов ремонтной ведомости судна (с пагинацией)."""
+    sections = dm.get_sections_for_ship(ship_id)
+
+    if not sections:
+        bot.edit_message_text(
+            "❌ Нет пунктов в ремонтной ведомости этого судна.",
+            call.message.chat.id,
+            call.message.message_id
+        )
+        bot.answer_callback_query(call.id)
+        return
+
+    page_data = dm.paginate_list(sections, page=page, page_size=10)
+
+    markup = types.InlineKeyboardMarkup()
+    for section in page_data["items"]:
+        section_hash = dm.section_hash(section)
+        btn = types.InlineKeyboardButton(
+            text=section or "Без раздела",
+            callback_data=f"section_{ship_id}_{section_hash}"
+        )
+        markup.add(btn)
+
+    # Кнопки пагинации разделов
+    nav_buttons = []
+    if page_data["has_prev"]:
+        nav_buttons.append(types.InlineKeyboardButton("⬅️ Назад", callback_data=f"sections_{ship_id}_{page_data['page'] - 1}"))
+    if page_data["has_next"]:
+        nav_buttons.append(types.InlineKeyboardButton("Далее ➡️", callback_data=f"sections_{ship_id}_{page_data['page'] + 1}"))
+    if nav_buttons:
+        markup.add(*nav_buttons)
+
+    bot.edit_message_text(
+        f"📋 Разделы ремонтной ведомости (судно: {ship_id}):\n"
+        f"Страница {page_data['page'] + 1}/{page_data['total_pages']}",
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup
+    )
+    bot.answer_callback_query(call.id)
+
+
 def register_navigation_handlers(bot):
     """Регистрирует обработчики навигации по пунктам ремонтной ведомости."""
 
@@ -271,59 +314,45 @@ def register_navigation_handlers(bot):
             )
             bot.answer_callback_query(call.id)
             return
-        
-        # Пагинация разделов (по 10 на странице)
-        page_data = dm.paginate_list(sections, page=0, page_size=10)
-        
-        markup = types.InlineKeyboardMarkup()
-        page_size = 10
-        for i, section in enumerate(page_data["items"]):
-            # Глобальный индекс раздела в полном списке (с учётом пагинации)
-            section_index = page_data["page"] * page_size + i
-            btn = types.InlineKeyboardButton(
-                text=section or "Без раздела",
-                callback_data=f"section_{ship_id}_{section_index}"
-            )
-            markup.add(btn)
-        
-        # Кнопки пагинации
-        nav_buttons = []
-        if page_data["has_prev"]:
-            nav_buttons.append(types.InlineKeyboardButton("⬅️ Назад", callback_data=f"sections_{ship_id}_0"))
-        if page_data["has_next"]:
-            nav_buttons.append(types.InlineKeyboardButton("Далее ➡️", callback_data=f"sections_{ship_id}_1"))
-        if nav_buttons:
-            markup.add(*nav_buttons)
-        
-        bot.edit_message_text(
-            f"📋 Разделы ремонтной ведомости (судно: {ship_id}):\n"
-            f"Страница {page_data['page'] + 1}/{page_data['total_pages']}",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=markup
-        )
-        bot.answer_callback_query(call.id)
-    
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("section_"))
-    def handle_section_select(call):
-        """Обработчик выбора раздела."""
+
+        _show_sections(bot, call, ship_id, page=0)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("sections_"))
+    def handle_sections_page(call):
+        """Пагинация списка разделов."""
         try:
             parts = call.data.split("_")
             ship_id = int(parts[1])
-            section_len = int(parts[2])
+            page = int(parts[2])
         except (ValueError, IndexError):
             bot.answer_callback_query(call.id, "❌ Ошибка в данных", show_alert=True)
             return
-        
-        # Получить пункты раздела
+        _show_sections(bot, call, ship_id, page=page)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("section_"))
+    def handle_section_select(call):
+        """Обработчик выбора раздела (по хешу названия)."""
+        try:
+            parts = call.data.split("_")
+            ship_id = int(parts[1])
+            section_hash = parts[2]
+        except (ValueError, IndexError):
+            bot.answer_callback_query(call.id, "❌ Ошибка в данных", show_alert=True)
+            return
+
+        # Найти раздел по хешу
         sections = dm.get_sections_for_ship(ship_id)
-        if section_len >= len(sections):
+        section = None
+        for s in sections:
+            if dm.section_hash(s) == section_hash:
+                section = s
+                break
+        if section is None:
             bot.answer_callback_query(call.id, "❌ Раздел не найден", show_alert=True)
             return
-        
-        section = sections[section_len]
+
         items = dm.get_items_for_section(ship_id, section)
-        
+
         if not items:
             bot.edit_message_text(
                 "❌ Нет пунктов в этом разделе.",
@@ -332,10 +361,10 @@ def register_navigation_handlers(bot):
             )
             bot.answer_callback_query(call.id)
             return
-        
+
         # Пагинация пунктов (по 10 на странице)
         page_data = dm.paginate_list(items, page=0, page_size=10)
-        
+
         markup = types.InlineKeyboardMarkup()
         for item in page_data["items"]:
             btn_text = f"{item['item_number']}. {item['description'][:30]}"
@@ -344,19 +373,20 @@ def register_navigation_handlers(bot):
                 callback_data=f"item_{item['id']}"
             )
             markup.add(btn)
-        
+
         # Кнопки пагинации
+        section_hash = dm.section_hash(section)
         nav_buttons = []
         if page_data["has_prev"]:
-            nav_buttons.append(types.InlineKeyboardButton("⬅️ Назад", callback_data=f"items_{ship_id}_{section_len}_0"))
+            nav_buttons.append(types.InlineKeyboardButton("⬅️ Назад", callback_data=f"items_{ship_id}_{section_hash}_0"))
         if page_data["has_next"]:
-            nav_buttons.append(types.InlineKeyboardButton("Далее ➡️", callback_data=f"items_{ship_id}_{section_len}_1"))
+            nav_buttons.append(types.InlineKeyboardButton("Далее ➡️", callback_data=f"items_{ship_id}_{section_hash}_1"))
         if nav_buttons:
             markup.add(*nav_buttons)
-        
+
         # Кнопка "Назад к разделам"
         markup.add(types.InlineKeyboardButton("🔙 К разделам", callback_data=f"ship_{ship_id}"))
-        
+
         bot.edit_message_text(
             f"📌 Пункты раздела: {section}\n"
             f"Страница {page_data['page'] + 1}/{page_data['total_pages']}",

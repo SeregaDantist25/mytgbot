@@ -10,6 +10,7 @@
 """
 
 import os
+import hashlib
 from datetime import datetime
 from models import SessionLocal, User, Ship, RepairStatement, StatementItem, Document
 from file_storage import storage
@@ -20,6 +21,10 @@ ROLE_ENGINEER = "engineer"
 ROLE_DIRECTOR = "director"
 ROLE_BUILDER = "builder"
 ROLE_CUSTOMER = "customer"
+
+# Стабильный хеш названия раздела для callback_data (не зависит от PYTHONHASHSEED)
+def section_hash(section):
+    return str(int(hashlib.md5(section.encode("utf-8")).hexdigest()[:8], 16))
 
 # Роли, которые могут загружать ремонтные ведомости
 ROLES_CAN_UPLOAD_REPAIR_LIST = {ROLE_ENGINEER, ROLE_DIRECTOR, ROLE_BUILDER}
@@ -233,37 +238,63 @@ def ensure_repair_list_loaded(ship_name, source_path):
 
 
 def get_sections_for_ship(ship_id):
-    """Получить список уникальных разделов для судна."""
+    """Получить список уникальных разделов для судна.
+
+    Включает обычные разделы (status=active) и отдельный раздел
+    «Дополнительные работы» (status=extra), если такие пункты есть.
+    Порядок стабилен (ORDER BY section).
+    """
     session = SessionLocal()
     try:
         statement = session.query(RepairStatement).filter_by(ship_id=ship_id).first()
         if not statement:
             return []
-        
-        sections = session.query(StatementItem.section).filter_by(
+
+        sections = session.query(StatementItem.section).filter(
+            StatementItem.statement_id == statement.id,
+            StatementItem.status == "active",
+            StatementItem.section.isnot(None),
+        ).distinct().order_by(StatementItem.section).all()
+        result = [s[0] for s in sections]
+
+        # Отдельный раздел для дополнительных работ
+        has_extra = session.query(StatementItem).filter_by(
             statement_id=statement.id,
-            status="active"
-        ).distinct().all()
-        
-        return [s[0] for s in sections if s[0]]  # отфильтровать None
+            status="extra",
+        ).first()
+        if has_extra:
+            result.append("Дополнительные работы")
+
+        return result
     finally:
         session.close()
 
 
 def get_items_for_section(ship_id, section):
-    """Получить пункты ремонтной ведомости для раздела."""
+    """Получить пункты ремонтной ведомости для раздела.
+
+    Для раздела «Дополнительные работы» возвращает пункты со статусом
+    extra; для остальных — пункты со статусом active.
+    """
     session = SessionLocal()
     try:
         statement = session.query(RepairStatement).filter_by(ship_id=ship_id).first()
         if not statement:
             return []
-        
-        items = session.query(StatementItem).filter_by(
-            statement_id=statement.id,
-            section=section,
-            status="active"
-        ).all()
-        
+
+        if section == "Дополнительные работы":
+            # Пункты доп. работ имеют status=extra и могут иметь любой section
+            items = session.query(StatementItem).filter_by(
+                statement_id=statement.id,
+                status="extra",
+            ).all()
+        else:
+            items = session.query(StatementItem).filter_by(
+                statement_id=statement.id,
+                section=section,
+                status="active",
+            ).all()
+
         return [
             {
                 "id": item.id,
