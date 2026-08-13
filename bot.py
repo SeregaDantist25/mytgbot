@@ -113,6 +113,14 @@ if bot_context.DOCUMENT_MANAGER_AVAILABLE:
     bot_handlers_new.register_upload_handlers(bot)
     bot_handlers_new.register_navigation_handlers(bot)
 
+# Диалог создания акта дефектации через AI (кнопка у пункта ведомости)
+try:
+    from ai.act_dialog import register_act_dialog_handlers
+    register_act_dialog_handlers(bot)
+    logger.info("Диалог создания акта дефектации через AI зарегистрирован.")
+except Exception as e:
+    logger.warning(f"Диалог создания акта дефектации через AI не загружен: {e}")
+
 # ============================================================
 #  ЗАПУСК С ПОВТОРНЫМИ ПОПЫТКАМИ
 # ============================================================

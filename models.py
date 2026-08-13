@@ -158,6 +158,36 @@ class Document(Base):
     uploader = relationship("User", back_populates="documents")
 
 
+class ActDialogSession(Base):
+    """Персистентная сессия диалога создания акта дефектации через AI.
+
+    Хранится в БД (SQLite/PostgreSQL), а не только в памяти процесса,
+    чтобы данные диалога (дефекты, правки, сгенерированный файл) не
+    терялись при перезапуске/передеплое бота (например, на Railway).
+    Списковые/словарные поля хранятся как JSON-строки.
+    """
+
+    __tablename__ = "act_dialog_sessions"
+
+    chat_id = Column(BigInteger, primary_key=True)
+    item_id = Column(Integer, nullable=False)
+    item_number = Column(String)
+    ship = Column(String)
+    equipment = Column(Text)
+    equipment_type = Column(String)
+    pump_type = Column(String)
+    gosts_json = Column(Text)  # JSON-список строк
+    defects_json = Column(Text)  # JSON-список строк
+    repair_type = Column(String)
+    extra_info = Column(Text)
+    corrections_json = Column(Text)  # JSON-список строк
+    edit_count = Column(Integer, default=0)
+    work_volume = Column(Text)
+    last_file = Column(LargeBinary)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 def init_models():
     """Создаёт таблицы через ORM (для SQLite) и добавляет недостающие колонки."""
     Base.metadata.create_all(engine)
