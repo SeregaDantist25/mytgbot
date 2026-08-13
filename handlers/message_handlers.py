@@ -323,35 +323,6 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
             import os
             os.unlink(tmp_path)
 
-def notify_contracts_for_approval() -> None:
-    """Уведомляет инженера-технолога и директоров о договорах на утверждение."""
-    conn = db._connect()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT d.doc_id, s.name AS ship_name FROM documents d "
-        "JOIN ships s ON s.ship_id = d.ship_id "
-        "WHERE d.doc_type = ? AND d.approved = 0",
-        (db.DOC_CONTRACT,),
-    )
-    pending = cur.fetchall()
-    cur.execute(
-        "SELECT user_id FROM users WHERE role IN (?, ?) AND approved = 1",
-        (db.ROLE_ENGINEER, db.ROLE_DIRECTOR),
-    )
-    approvers = [r["user_id"] for r in cur.fetchall()]
-    conn.close()
-    if not pending:
-        return
-    for uid in approvers:
-        try:
-            lines = ["📄 Договоры, ожидающие утверждения:"]
-            for p in pending:
-                lines.append(f"• {p['ship_name']} (id={p['doc_id']})")
-            lines.append("\nОтветьте: /approve_contract <id> или /reject_contract <id>")
-            bot.send_message(uid, "\n".join(lines))
-        except Exception:
-            pass
-
     @bot.message_handler(commands=['approve_contract'])
     def cmd_approve_contract(message):
         """Утверждение договора (инженер-технолог или директор)."""
@@ -990,3 +961,33 @@ def notify_contracts_for_approval() -> None:
             "📋 Список ГОСТов — '/gosts'\n"
             "🔎 Поиск по ГОСТам — '/search подшипник'",
         )
+
+
+def notify_contracts_for_approval() -> None:
+    """Уведомляет инженера-технолога и директоров о договорах на утверждение."""
+    conn = db._connect()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT d.doc_id, s.name AS ship_name FROM documents d "
+        "JOIN ships s ON s.ship_id = d.ship_id "
+        "WHERE d.doc_type = ? AND d.approved = 0",
+        (db.DOC_CONTRACT,),
+    )
+    pending = cur.fetchall()
+    cur.execute(
+        "SELECT user_id FROM users WHERE role IN (?, ?) AND approved = 1",
+        (db.ROLE_ENGINEER, db.ROLE_DIRECTOR),
+    )
+    approvers = [r["user_id"] for r in cur.fetchall()]
+    conn.close()
+    if not pending:
+        return
+    for uid in approvers:
+        try:
+            lines = ["📄 Договоры, ожидающие утверждения:"]
+            for p in pending:
+                lines.append(f"• {p['ship_name']} (id={p['doc_id']})")
+            lines.append("\nОтветьте: /approve_contract <id> или /reject_contract <id>")
+            bot_context.bot.send_message(uid, "\n".join(lines))
+        except Exception:
+            pass
