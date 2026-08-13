@@ -24,6 +24,7 @@ import threading
 import subprocess
 import logging
 from datetime import datetime
+from typing import Optional
 
 from docx import Document as DocxDocument
 
@@ -49,6 +50,7 @@ CHECKLISTS_FILE = os.path.join(DATA_DIR, "checklists.json")
 COUNTERS_FILE = os.path.join(DATA_DIR, "counters.json")
 SHIPS_FILE = os.path.join(DATA_DIR, "ships.json")
 COMPANIES_FILE = os.path.join(DATA_DIR, "companies.json")
+EMPLOYEES_FILE = os.path.join(DATA_DIR, "employees.json")
 COUNTERS_DB = os.path.join(DATA_DIR, "counters.db")
 CHAT_STATE_FILE = os.path.join(DATA_DIR, "chat_state.json")
 
@@ -79,6 +81,41 @@ def load_ships() -> dict:
         return {}
     with open(SHIPS_FILE, 'r', encoding='utf-8') as f:
         return json.load(f)
+
+
+def load_employees() -> list:
+    """Загружает список сотрудников из data/employees.json.
+
+    Returns:
+        Список словарей вида {"name": str, "role": str}.
+    """
+    if not os.path.exists(EMPLOYEES_FILE):
+        return []
+    try:
+        with open(EMPLOYEES_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data.get("employees", [])
+    except Exception:
+        return []
+
+
+def find_employee_role(name: str) -> Optional[str]:
+    """Ищет роль сотрудника по ФИО (без учёта регистра).
+
+    Args:
+        name: ФИО пользователя.
+
+    Returns:
+        Роль сотрудника или None, если ФИО не найдено.
+    """
+    if not name:
+        return None
+    normalized = " ".join(name.strip().lower().split())
+    for emp in load_employees():
+        emp_name = " ".join(str(emp.get("name", "")).strip().lower().split())
+        if emp_name == normalized:
+            return emp.get("role")
+    return None
 
 
 def load_companies() -> dict:

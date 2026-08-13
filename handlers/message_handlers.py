@@ -38,6 +38,7 @@ from services.extra import (
     generate_work_volume,
     generate_base_work_volume,
     get_user_role,
+    find_employee_role,
     can_upload_repair_list,
     save_repair_items_to_db,
 )
@@ -476,6 +477,17 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
                 if not name:
                     bot.reply_to(message, "Введите ФИО:")
                     return
+                # Автоматическое назначение роли по ФИО из employees.json
+                auto_role = find_employee_role(name)
+                if auto_role:
+                    us.create_user(message.chat.id, name, auto_role, approved=1)
+                    set_chat_state(message.chat.id, "reg_step", None)
+                    set_chat_state(message.chat.id, "reg_name", None)
+                    bot.reply_to(
+                        message,
+                        f"✅ Вы зарегистрированы как {us.ROLE_LABELS.get(auto_role, auto_role)}, {name}!",
+                    )
+                    return
                 set_chat_state(message.chat.id, "reg_name", name)
                 set_chat_state(message.chat.id, "reg_step", "role")
                 bot.reply_to(
@@ -680,6 +692,14 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
                 set_chat_state(message.chat.id, "clarification", "other")
                 bot.reply_to(message, "✅ Принято: другое оборудование")
                 return
+
+        # --- ПРОПУСК ОТВЕТОВ НА КНОПКИ/СООБЩЕНИЯ БОТА ---
+        # Ответы на callback-кнопки и reply на сообщения бота не должны
+        # уходить в NLP. Активные сценарии (регистрация, основание акта,
+        # выбор судна, уточнения) обработаны выше, поэтому здесь это
+        # безопасно пропускаем.
+        if message.reply_to_message:
+            return
 
         # ---- 1. АКТ ДЕФЕКТАЦИИ (ЧЕРЕЗ АЛИСУ) ----
         if any(word in text_lower for word in ['сделай акт', 'акт дефектации', 'оформи акт', 'составь акт']):
