@@ -469,6 +469,10 @@ def register_navigation_handlers(bot):
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("📤 Загрузить документ", callback_data=f"upload_{item_id}"))
         markup.add(types.InlineKeyboardButton("🧠 Создать акт дефектации (AI)", callback_data=f"aiact_start_{item_id}"))
+        # Если есть загруженный акт дефектации — даём возможность скачать
+        defect_act = next((d for d in item['documents'] if d['category'] == 'defect_act'), None)
+        if defect_act:
+            markup.add(types.InlineKeyboardButton("📥 Скачать акт дефектации", callback_data=f"download_act_{defect_act['id']}"))
         # Назад к списку пунктов раздела (с контекстом судна и раздела)
         ship_id = dm.get_ship_id_for_item(item_id)
         section_hash = dm.section_hash(item['section']) if item['section'] else ""
@@ -482,6 +486,27 @@ def register_navigation_handlers(bot):
             reply_markup=markup
         )
         bot.answer_callback_query(call.id)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("download_act_"))
+    def handle_download_act(call):
+        """Скачивание загруженного акта дефектации."""
+        try:
+            doc_id = int(call.data.split("_")[2])
+        except (ValueError, IndexError):
+            bot.answer_callback_query(call.id, "❌ Ошибка в данных", show_alert=True)
+            return
+
+        file_bytes = storage.get_file(document_id=doc_id)
+        if not file_bytes:
+            bot.answer_callback_query(call.id, "❌ Файл не найден", show_alert=True)
+            return
+
+        bot.answer_callback_query(call.id)
+        bot.send_document(
+            call.message.chat.id,
+            file_bytes,
+            visible_file_name=f"Акт_дефектации_{doc_id}.docx",
+        )
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("back_to_items_"))
     def handle_back_to_items(call):
