@@ -45,6 +45,8 @@ from services.extra import (
 from services.document_builder import create_defect_document, create_avr_document
 from models import SessionLocal, Ship
 
+from utils import NAVIGATION_BUTTONS
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,7 +65,7 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
     def show_navigation_menu(chat_id, text="👋 Используйте кнопки для навигации."):
         """Показать ReplyKeyboardMarkup с кнопками навигации."""
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        for btn in bot_context.NAVIGATION_BUTTONS:
+        for btn in NAVIGATION_BUTTONS:
             markup.add(btn)
         bot.send_message(chat_id, text, reply_markup=markup)
 
@@ -467,6 +469,12 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
         text_lower = user_text.lower()
 
         if user_text.startswith('/'):
+            return
+
+        # --- ПРОПУСК КНОПОК НАВИГАЦИИ ---
+        # Кнопки меню обрабатываются отдельными хендлерами (bot_handlers_new),
+        # поэтому не должны уходить в NLP.
+        if user_text in NAVIGATION_BUTTONS:
             return
 
         # --- РЕГИСТРАЦИЯ НОВОГО ПОЛЬЗОВАТЕЛЯ ---
