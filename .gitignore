@@ -13,7 +13,6 @@ data/counters.db
 data/chat_state.json
 data/documents.db
 data/documents/
-acts/
 
 # Логи
 bot.log
