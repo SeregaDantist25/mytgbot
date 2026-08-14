@@ -13,6 +13,7 @@ ORM-модели для новой схемы документооборота.
 """
 
 import os
+from datetime import date
 from sqlalchemy import (
     Column,
     Integer,
@@ -21,6 +22,7 @@ from sqlalchemy import (
     String,
     ForeignKey,
     DateTime,
+    Date,
     func,
     create_engine,
     LargeBinary,
@@ -102,8 +104,11 @@ class Ship(Base):
     name = Column(String, nullable=False)
     status = Column(String, default="в работе")
     year = Column(Integer)
+    company_id = Column(Integer, ForeignKey("companies.id"), index=True)
 
     statements = relationship("RepairStatement", back_populates="ship")
+    company = relationship("Company", back_populates="ships")
+    repair_requests = relationship("RepairRequest", back_populates="ship")
 
 
 class RepairStatement(Base):
@@ -241,6 +246,109 @@ class ActDialogSession(Base):
     edit_count = Column(Integer, default=0)
     work_volume = Column(Text)
     last_file = Column(LargeBinary)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class Company(Base):
+    """Компания-заказчик.
+
+    Ранее хранилась в data/companies.json — перенесено в БД для:
+    - CRUD операций через сервис
+    - Связей с судами и заявками
+    - Аудита изменений
+    - Поиска и фильтрации
+    """
+
+    __tablename__ = "companies"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False, unique=True, index=True)
+    inn = Column(String, unique=True, index=True)  # ИНН 10/12 цифр
+    contact_person = Column(String)  # Контактное лицо
+    phone = Column(String)
+    email = Column(String)
+    address = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    ships = relationship("Ship", back_populates="company")
+    repair_requests = relationship("RepairRequest", back_populates="company")
+
+
+class Employee(Base):
+    """Сотрудник предприятия.
+
+    Ранее хранился в data/employees.json — перенесено в БД для:
+    - CRUD операций через сервис
+    - Связей с заявками и документами
+    - Квалификации и допусков
+    - Поиска по должности/ФИО
+    """
+
+    __tablename__ = "employees"
+
+    id = Column(Integer, primary_key=True)
+    full_name = Column(String, nullable=False, index=True)
+    position = Column(String)  # Должность
+    qualification = Column(String)  # Квалификация (разряд, категория)
+    phone = Column(String)
+    email = Column(String)
+    department = Column(String)  # Отдел/цех
+    hire_date = Column(Date)
+    is_active = Column(Integer, default=1)  # 1 — работает, 0 — уволен
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class RepairRequest(Base):
+    """Заявка на ремонт судна.
+
+    Связывает заказчика, судно и перечень работ.
+    Имеет жизненный цикл: draft → submitted → in_progress → completed → closed.
+    """
+
+    __tablename__ = "repair_requests"
+
+    id = Column(Integer, primary_key=True)
+    request_number = Column(String, unique=True, nullable=False)  # Номер заявки (RR-2025-001)
+    company_id = Column(Integer, ForeignKey("companies.id"))
+    ship_id = Column(Integer, ForeignKey("ships.id"))
+    description = Column(Text)  # Описание проблемы
+    priority = Column(String, default="normal")  # low, normal, high, critical
+    status = Column(String, default="draft", index=True)  # draft, submitted, in_progress, completed, closed
+    estimated_cost = Column(Integer)  # Ожидаемая стоимость (копейки)
+    actual_cost = Column(Integer)  # Фактическая стоимость
+    start_date = Column(Date)  # Плановая дата начала
+    end_date = Column(Date)  # Плановая дата завершения
+    actual_start_date = Column(Date)  # Фактическая дата начала
+    actual_end_date = Column(Date)  # Фактическая дата завершения
+    assigned_employee_id = Column(Integer, ForeignKey("employees.id"))  # Ответственный сотрудник
+    created_by = Column(BigInteger, ForeignKey("users.telegram_id"))
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    company = relationship("Company", back_populates="repair_requests")
+    ship = relationship("Ship", back_populates="repair_requests")
+    assigned_employee = relationship("Employee")
+    creator = relationship("User")
+
+
+class ActTemplate(Base):
+    """Шаблон документа для автоматического заполнения.
+
+    Хранит шаблоны актов (дефектации, выполненных работ и т.д.)
+    с метаданными для подстановки данных из БД.
+    """
+
+    __tablename__ = "act_templates"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)  # Название шаблона
+    template_type = Column(String, nullable=False)  # defect_act, work_act, technical_act, repair_sheet
+    file_ref = Column(String, nullable=False)  # Путь к файлу шаблона (DOCX/XLSX)
+    description = Column(Text)  # Описание шаблона
+    is_active = Column(Integer, default=1)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

@@ -1,18 +1,38 @@
-.env
+```
+# Python
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
 .venv/
+.ENV
+.ENV.db
+*.env
 
-# Файлы блокировки LibreOffice/Office
-.~lock.*#
+# Database
+*.db
+*.sqlite
+*.sqlite3
 
-# Архив (неиспользуемые файлы, только по необходимости)
-archive/
+# Logs
+*.log
 
-# Рабочие данные (создаются при работе бота)
-data/counters.db
-data/chat_state.json
-data/documents.db
-data/documents/
+# Coverage
+.coverage
+coverage/
+htmlcov/
 
-# Логи
-bot.log
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+```
