@@ -113,6 +113,35 @@ class RepairItemCreate(BaseModel):
         return v.strip()
 
 
+class OrderStatus(str, Enum):
+    """Статусы заявки на ремонт"""
+    NEW = "new"
+    IN_PROGRESS = "in_progress"
+    DONE = "done"
+    CLOSED = "closed"
+    CANCELLED = "cancelled"
+
+
+class RepairOrderCreate(BaseModel):
+    """Схема для создания заявки на ремонт"""
+    ship_id: int = Field(..., gt=0, description="ID судна")
+    work_type: str = Field(..., min_length=1, max_length=500, description="Тип работ")
+    cost_kopecks: int = Field(default=0, ge=0, description="Стоимость в копейках (целое, >= 0)")
+
+    @field_validator('work_type')
+    @classmethod
+    def validate_work_type(cls, v: str) -> str:
+        """Запрещает опасные символы в типе работ"""
+        if any(char in v for char in ['<', '>', '"', "'", ';', '--']):
+            raise ValueError('Work type contains invalid characters')
+        return v.strip()
+
+
+class RepairOrderStatusUpdate(BaseModel):
+    """Схема для смены статуса заявки"""
+    status: OrderStatus = Field(..., description="Новый статус заявки")
+
+
 class CallbackData(BaseModel):
     """Схема для валидации callback данных"""
     action: str = Field(..., min_length=1, max_length=50, description="Действие")

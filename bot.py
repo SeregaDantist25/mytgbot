@@ -233,6 +233,10 @@ if __name__ == '__main__':
         handle_document_approve, handle_document_archive, handle_document_delete,
     )
 
+    # Регистрация команд управления заявками на ремонт
+    import order_commands
+    order_commands.register_order_commands(bot, bot_context.ADMIN_IDS)
+
     # Периодическое сканирование папки repair_docs
     start_scan_timer()
 

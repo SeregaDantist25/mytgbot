@@ -158,6 +158,63 @@ class Document(Base):
     uploader = relationship("User", back_populates="documents")
 
 
+class RepairOrder(Base):
+    """Заявка на ремонт судна.
+
+    Отличается от RepairStatement: RepairStatement — это загруженная из Excel
+    ремонтная ведомость (перечень пунктов), а RepairOrder — управленческая
+    заявка (когда, что за работы, в каком статусе, за сколько).
+
+    Почему стоимость в копейках (BigInteger), а не Numeric/float:
+    хранение денег как float даёт ошибки округления; целое число копеек
+    точно, компактно и одинаково работает в SQLite и PostgreSQL.
+    """
+
+    __tablename__ = "repair_orders"
+
+    # Разрешённые статусы и допустимые переходы между ними.
+    # Ключ — текущий статус, значение — множество статусов, куда можно перейти.
+    STATUSES = ("new", "in_progress", "done", "closed", "cancelled")
+    TRANSITIONS = {
+        "new": {"in_progress", "cancelled"},
+        "in_progress": {"done", "cancelled"},
+        "done": {"closed", "in_progress"},
+        "closed": set(),
+        "cancelled": set(),
+    }
+
+    id = Column(Integer, primary_key=True)
+    ship_id = Column(Integer, ForeignKey("ships.id"), nullable=False, index=True)
+    work_type = Column(String)
+    status = Column(String, nullable=False, default="new", index=True)
+    cost_kopecks = Column(BigInteger, nullable=False, default=0)
+    created_by = Column(BigInteger, ForeignKey("users.telegram_id"))
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    ship = relationship("Ship")
+    status_history = relationship(
+        "OrderStatusHistory",
+        back_populates="order",
+        cascade="all, delete-orphan",
+    )
+
+
+class OrderStatusHistory(Base):
+    """История изменений статуса заявки на ремонт (аудит переходов)."""
+
+    __tablename__ = "order_status_history"
+
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey("repair_orders.id"), nullable=False, index=True)
+    from_status = Column(String)
+    to_status = Column(String, nullable=False)
+    changed_by = Column(BigInteger)
+    changed_at = Column(DateTime, server_default=func.now())
+
+    order = relationship("RepairOrder", back_populates="status_history")
+
+
 class ActDialogSession(Base):
     """Персистентная сессия диалога создания акта дефектации через AI.
 
