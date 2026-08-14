@@ -255,6 +255,11 @@ def _show_sections(bot, call, ship_id, page=0):
     if nav_buttons:
         markup.add(*nav_buttons)
 
+    # Точка входа в заявки на ремонт по судну (кнопочный UI)
+    markup.add(types.InlineKeyboardButton(
+        "📌 Заявки судна", callback_data=f"ord:list:{ship_id}"
+    ))
+
     bot.edit_message_text(
         f"📋 Разделы ремонтной ведомости (судно: {ship_id}):\n"
         f"Страница {page_data['page'] + 1}/{page_data['total_pages']}",
@@ -317,10 +322,16 @@ def register_navigation_handlers(bot):
         sections = dm.get_sections_for_ship(ship_id)
         
         if not sections:
+            # Разделов нет, но заявки по судну доступны всегда
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton(
+                "📌 Заявки судна", callback_data=f"ord:list:{ship_id}"
+            ))
             bot.edit_message_text(
                 "❌ Нет пунктов в ремонтной ведомости этого судна.",
                 call.message.chat.id,
-                call.message.message_id
+                call.message.message_id,
+                reply_markup=markup
             )
             bot.answer_callback_query(call.id)
             return

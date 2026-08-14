@@ -15,12 +15,29 @@
 внутри хранится в копейках.
 """
 
+from telebot import types
+
 from utils.decorators import require_role
 from services import order_service
+from services.extra import get_user_role
 
 
 # Роли, которым разрешено работать с заявками (заказчик исключён намеренно).
 _ORDER_ROLES = ["engineer", "engineer_technologist", "director", "builder"]
+
+# Человекочитаемые названия статусов для кнопок и карточек.
+_STATUS_LABELS = {
+    "new": "\U0001f195 \u041d\u043e\u0432\u0430\u044f",
+    "in_progress": "\U0001f527 \u0412 \u0440\u0430\u0431\u043e\u0442\u0435",
+    "done": "\u2705 \u0412\u044b\u043f\u043e\u043b\u043d\u0435\u043d\u0430",
+    "closed": "\U0001f512 \u0417\u0430\u043a\u0440\u044b\u0442\u0430",
+    "cancelled": "\u274c \u041e\u0442\u043c\u0435\u043d\u0435\u043d\u0430",
+}
+
+
+def _status_label(status: str) -> str:
+    """Возвращает человекочитаемое название статуса (или сам статус)."""
+    return _STATUS_LABELS.get(status, status)
 
 
 def _parse_rubles_to_kopecks(raw: str) -> int:
@@ -170,3 +187,118 @@ def register_order_commands(bot, admin_ids):
             return
         ok, msg = order_service.delete_order(order_id, message.from_user.id, admin_ids)
         bot.reply_to(message, msg)
+
+    # ============================================================
+    #  КНОПОЧНЫЙ UI (inline callback), префикс callback_data — "ord:"
+    #  Форматы:
+    #    ord:list:<ship_id>          — список заявок судна
+    #    ord:card:<order_id>         — карточка заявки
+    #    ord:st:<order_id>:<status>  — смена статуса
+    # ============================================================
+
+    def _user_can(call) -> bool:
+        """Проверяет роль пользователя для callback-действий с заявками."""
+        return get_user_role(call.from_user.id) in _ORDER_ROLES
+
+    def _render_order_card(order):
+        """Собирает текст карточки заявки и inline-клавиатуру смены статуса."""
+        from models import RepairOrder
+
+        history = order_service.get_status_history(order.id)
+        hist_lines = [
+            f"   {_status_label(h.from_status) if h.from_status else '\u2014'} \u2192 "
+            f"{_status_label(h.to_status)} ({h.changed_at:%Y-%m-%d %H:%M})"
+            for h in history
+        ]
+        text = (
+            f"\U0001f4c4 \u0417\u0430\u044f\u0432\u043a\u0430 \u2116{order.id}\n"
+            f"\u0421\u0443\u0434\u043d\u043e: {order.ship_id}\n"
+            f"\u0420\u0430\u0431\u043e\u0442\u044b: {order.work_type or '\u2014'}\n"
+            f"\u0421\u0442\u0430\u0442\u0443\u0441: {_status_label(order.status)}\n"
+            f"\u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c: {order_service.format_cost(order.cost_kopecks)}\n"
+            f"\u0418\u0441\u0442\u043e\u0440\u0438\u044f \u0441\u0442\u0430\u0442\u0443\u0441\u043e\u0432:\n" + ("\n".join(hist_lines) or "   \u2014")
+        )
+
+        markup = types.InlineKeyboardMarkup()
+        allowed = sorted(RepairOrder.TRANSITIONS.get(order.status, set()))
+        status_btns = [
+            types.InlineKeyboardButton(
+                _status_label(st), callback_data=f"ord:st:{order.id}:{st}"
+            )
+            for st in allowed
+        ]
+        for i in range(0, len(status_btns), 2):
+            markup.add(*status_btns[i:i + 2])
+        markup.add(types.InlineKeyboardButton(
+            "\U0001f519 \u041a \u0441\u043f\u0438\u0441\u043a\u0443", callback_data=f"ord:list:{order.ship_id}"
+        ))
+        return text, markup
+
+    def _render_ship_orders(ship_id):
+        """Собирает текст списка заявок судна и inline-клавиатуру."""
+        orders = order_service.list_orders(ship_id=ship_id)
+        markup = types.InlineKeyboardMarkup()
+        if not orders:
+            text = "\U0001f4ed \u0423 \u044d\u0442\u043e\u0433\u043e \u0441\u0443\u0434\u043d\u0430 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442 \u0437\u0430\u044f\u0432\u043e\u043a."
+            return text, markup
+        text = "\U0001f4cb \u0417\u0430\u044f\u0432\u043a\u0438 \u043d\u0430 \u0440\u0435\u043c\u043e\u043d\u0442:"
+        for o in orders:
+            markup.add(types.InlineKeyboardButton(
+                f"\u2116{o.id} \u2022 {_status_label(o.status)} \u2022 "
+                f"{order_service.format_cost(o.cost_kopecks)}",
+                callback_data=f"ord:card:{o.id}"
+            ))
+        return text, markup
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("ord:list:"))
+    def cb_order_list(call):
+        """Список заявок судна."""
+        if not _user_can(call):
+            bot.answer_callback_query(call.id, "\u274c \u041d\u0435\u0442 \u043f\u0440\u0430\u0432", show_alert=True)
+            return
+        try:
+            ship_id = int(call.data.split(":")[2])
+        except (ValueError, IndexError):
+            bot.answer_callback_query(call.id, "\u274c \u041e\u0448\u0438\u0431\u043a\u0430 \u0434\u0430\u043d\u043d\u044b\u0445", show_alert=True)
+            return
+        text, markup = _render_ship_orders(ship_id)
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
+        bot.answer_callback_query(call.id)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("ord:card:"))
+    def cb_order_card(call):
+        """Карточка заявки с кнопками смены статуса."""
+        if not _user_can(call):
+            bot.answer_callback_query(call.id, "\u274c \u041d\u0435\u0442 \u043f\u0440\u0430\u0432", show_alert=True)
+            return
+        try:
+            order_id = int(call.data.split(":")[2])
+        except (ValueError, IndexError):
+            bot.answer_callback_query(call.id, "\u274c \u041e\u0448\u0438\u0431\u043a\u0430 \u0434\u0430\u043d\u043d\u044b\u0445", show_alert=True)
+            return
+        order = order_service.get_order(order_id)
+        if not order:
+            bot.answer_callback_query(call.id, "\u274c \u0417\u0430\u044f\u0432\u043a\u0430 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u0430", show_alert=True)
+            return
+        text, markup = _render_order_card(order)
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
+        bot.answer_callback_query(call.id)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("ord:st:"))
+    def cb_order_status(call):
+        """Смена статуса заявки кнопкой."""
+        if not _user_can(call):
+            bot.answer_callback_query(call.id, "\u274c \u041d\u0435\u0442 \u043f\u0440\u0430\u0432", show_alert=True)
+            return
+        try:
+            _, _, raw_id, new_status = call.data.split(":", 3)
+            order_id = int(raw_id)
+        except (ValueError, IndexError):
+            bot.answer_callback_query(call.id, "\u274c \u041e\u0448\u0438\u0431\u043a\u0430 \u0434\u0430\u043d\u043d\u044b\u0445", show_alert=True)
+            return
+        ok, msg = order_service.change_status(order_id, new_status, call.from_user.id)
+        bot.answer_callback_query(call.id, msg, show_alert=not ok)
+        order = order_service.get_order(order_id)
+        if order:
+            text, markup = _render_order_card(order)
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
