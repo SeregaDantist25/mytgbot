@@ -212,14 +212,14 @@ if __name__ == '__main__':
             logger.warning(f"[ACTS] Ошибка автоимпорта актов: {e}")
 
     # Регистрация команд управления документами
-    from services.extra import handle_document_approve, handle_document_archive, handle_document_delete
+    from services.document_service import approve_document, archive_document, delete_document
     document_commands.register_document_commands(
         bot, bot_context.ADMIN_IDS,
-        handle_document_approve,
-        lambda document_id, user_id: handle_document_archive(
+        approve_document,
+        lambda document_id, user_id: archive_document(
             document_id, user_id, bot_context.ADMIN_IDS
         ),
-        lambda document_id, user_id: handle_document_delete(
+        lambda document_id, user_id: delete_document(
             document_id, user_id, bot_context.ADMIN_IDS
         ),
     )

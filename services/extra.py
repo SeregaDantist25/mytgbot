@@ -23,18 +23,13 @@ import subprocess
 import logging
 from datetime import datetime
 
-from models import (
-    SessionLocal,
-    User,
-    Ship,
-    RepairStatement,
-    StatementItem,
-)
 from services.document_service import (
-    approve_document,
-    archive_document,
-    delete_document,
+    approve_document as handle_document_approve,
+    archive_document as handle_document_archive,
+    delete_document as handle_document_delete,
 )
+from services.repair_statement_service import save_repair_items_to_db
+from services.user_service import can_upload_repair_list, get_user_role
 from services.chat_state_service import get_chat_state, set_chat_state
 from services.document_counter_service import (
     get_counter,
@@ -717,105 +712,6 @@ def build_defect_table_engine(defects: list, work_volume: str) -> list:
         })
 
     return rows
-
-
-# ============================================================
-#  ФУНКЦИИ ORM: НАГРУЗКА РЕМОНТНОЙ ВЕДОМОСТИ
-# ============================================================
-
-def save_repair_items_to_db(ship_id: int, items: list) -> tuple:
-    """
-    Сохраняет пункты ремонтной ведомости в БД с дедупликацией.
-    Возвращает: (inserted_count, skipped_count, statement_id)
-    """
-    session = SessionLocal()
-    try:
-        stmt = RepairStatement(ship_id=ship_id, source_excel_file_ref="uploaded")
-        session.add(stmt)
-        session.flush()
-        statement_id = stmt.id
-
-        inserted = 0
-        skipped = 0
-
-        for item in items:
-            existing = session.query(StatementItem).filter(
-                StatementItem.statement_id == statement_id,
-                StatementItem.item_number == item.get("item_number"),
-                StatementItem.section == item.get("section"),
-            ).first()
-
-            if existing:
-                skipped += 1
-                continue
-
-            stmt_item = StatementItem(
-                statement_id=statement_id,
-                item_number=item.get("item_number"),
-                description=item.get("description"),
-                quantity=item.get("quantity"),
-                section=item.get("section"),
-                status="active",
-            )
-            session.add(stmt_item)
-            inserted += 1
-
-        session.commit()
-        return inserted, skipped, statement_id
-    except Exception as e:
-        session.rollback()
-        raise e
-    finally:
-        session.close()
-
-
-def get_user_role(telegram_id: int) -> str:
-    """Получить роль пользователя из ORM."""
-    session = SessionLocal()
-    try:
-        user = session.query(User).filter_by(telegram_id=telegram_id).first()
-        return user.role if user else "customer"
-    finally:
-        session.close()
-
-
-def can_upload_repair_list(telegram_id: int) -> bool:
-    """Проверить, может ли пользователь загружать ремонтную ведомость.
-    Доступно всем, кроме customer.
-    """
-    role = get_user_role(telegram_id)
-    return role != "customer"
-
-
-# ============================================================
-#  ФУНКЦИИ ВЕРСИОНИРОВАНИЯ ДОКУМЕНТОВ
-# ============================================================
-
-def handle_document_approve(document_id: int, user_id: int) -> tuple:
-    """
-    Утвердить документ: draft → approved.
-    Возвращает: (success, message)
-    """
-    return approve_document(document_id, user_id)
-
-
-def handle_document_archive(document_id: int, user_id: int, admin_ids: list | None = None) -> tuple:
-    """
-    Архивировать документ: approved → archived.
-    Только ADMIN_IDS.
-    Возвращает: (success, message)
-    """
-    return archive_document(document_id, user_id, admin_ids)
-
-
-def handle_document_delete(document_id: int, user_id: int, admin_ids: list | None = None) -> tuple:
-    """
-    Удалить документ.
-    - draft: любой может удалить
-    - approved: только ADMIN_IDS
-    Возвращает: (success, message)
-    """
-    return delete_document(document_id, user_id, admin_ids)
 
 
 # Экземпляр базы данных насосов (для обратной совместимости)

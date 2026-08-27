@@ -169,6 +169,16 @@ def get_user_role(telegram_id: int) -> str:
     return user.role if user else ROLE_CUSTOMER
 
 
+def can_upload_repair_list(telegram_id: int) -> bool:
+    """Ремонтные ведомости могут загружать все производственные роли."""
+    return get_user_role(telegram_id) in {
+        ROLE_ENGINEER,
+        ROLE_ENGINEER_TECHNOLOGIST,
+        ROLE_DIRECTOR,
+        ROLE_BUILDER,
+    }
+
+
 # ============================================================
 #  ЗАЯВКИ НА РЕГИСТРАЦИЮ
 # ============================================================

@@ -34,8 +34,8 @@ from services.extra import (
     detect_equipment_type,
     detect_pump_type,
     generate_work_volume,
-    get_user_role,
 )
+from services.user_service import get_user_role
 from services.defect_act_service import generate_defect_act
 from services.defect_profiles import (
     PROFILE_LABELS,

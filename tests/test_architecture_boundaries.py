@@ -80,3 +80,15 @@ def test_document_builder_uses_dedicated_template_service():
     extra_import = source.split("from services.extra import (", 1)[1].split(")", 1)[0]
     assert "load_template" not in extra_import
     assert "replace_placeholders" not in extra_import
+
+
+def test_active_modules_do_not_import_roles_or_repair_storage_from_extra():
+    modules = [
+        ROOT / "handlers" / "message_handlers.py",
+        ROOT / "ai" / "act_dialog.py",
+        ROOT / "order_commands.py",
+        ROOT / "utils" / "decorators.py",
+    ]
+    for module in modules:
+        source = module.read_text(encoding="utf-8")
+        assert "from services.user_service import" in source
