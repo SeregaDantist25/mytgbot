@@ -162,7 +162,7 @@ class FileStorage:
         finally:
             session.close()
 
-    def delete_file(self, document_id=None, file_ref=None):
+    def delete_file(self, document_id=None, file_ref=None, allow_approved=False):
         """
         Удаляет файл. Проверяет по БД, что документ не approved.
         
@@ -186,7 +186,7 @@ class FileStorage:
                 return False
             
             # Не удаляем approved документы
-            if doc.status == "approved":
+            if doc.status == "approved" and not allow_approved:
                 return False
             
             # Удаляем с диска (если есть)

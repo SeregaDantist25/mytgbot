@@ -211,6 +211,45 @@ def _delete_session(chat_id):
         db.close()
 
 
+def build_act_file(session):
+    """Строит XLSX акта из данных диалога без обращения к Telegram."""
+    full_text = " ".join(session["defects"]) + " " + session.get("extra_info", "")
+    work_volume = generate_work_volume(
+        session["defects"], full_text, session.get("pump_type"), session.get("equipment_type")
+    )
+    if session.get("gosts"):
+        work_volume += "\n\nПрименимые ГОСТы: " + ", ".join(
+            gost.split(" — ")[0] for gost in session["gosts"]
+        )
+
+    basis = f"Ремонтная ведомость судна «{session['ship']}», пункт {session['item_number']}"
+    profile = detect_defect_profile(session["equipment"])
+    rows = build_defect_rows(
+        session["equipment"], session["defects"], work_volume, profile,
+        quantity=session.get("item_quantity"),
+    )
+    file_bytes = generate_defect_act({
+        "act_number": session["item_number"],
+        "act_date": datetime.now().strftime("%d.%m.%Y"),
+        "ship": session["ship"],
+        "order_number": session.get("order_number"),
+        "repair_item": session["item_number"],
+        "manager": session.get("manager_name"),
+        "equipment": session["equipment"],
+        "repair_category": session.get("repair_type") or "Текущий ремонт",
+        "work_summary": f"Дефектация: {PROFILE_LABELS.get(profile, PROFILE_LABELS['general'])}",
+        "basis": basis,
+        "rows": rows,
+        "conclusion": (
+            "Выявленные дефекты подлежат устранению согласно указанному "
+            "объёму ремонтных работ. После ремонта выполнить сборку, "
+            "регулировку и контрольные испытания."
+        ),
+        "contractor_name": session.get("contractor_name"),
+    })
+    return file_bytes, work_volume
+
+
 def register_act_dialog_handlers(bot):
     """Регистрирует обработчики диалога создания акта дефектации через AI."""
 
@@ -220,41 +259,7 @@ def register_act_dialog_handlers(bot):
             bot.send_message(chat_id, "⏳ Сессия создания акта истекла. Начните заново.")
             return
         try:
-            full_text = " ".join(session["defects"]) + " " + session.get("extra_info", "")
-            work_volume = generate_work_volume(
-                session["defects"], full_text, session.get("pump_type"), session.get("equipment_type")
-            )
-            if session.get("gosts"):
-                work_volume += "\n\nПрименимые ГОСТы: " + ", ".join(
-                    g.split(" — ")[0] for g in session["gosts"]
-                )
-
-            basis = f"Ремонтная ведомость судна «{session['ship']}», пункт {session['item_number']}"
-
-            profile = detect_defect_profile(session["equipment"])
-            rows = build_defect_rows(
-                session["equipment"], session["defects"], work_volume, profile,
-                quantity=session.get("item_quantity"),
-            )
-            file_bytes = generate_defect_act({
-                "act_number": session["item_number"],
-                "act_date": datetime.now().strftime("%d.%m.%Y"),
-                "ship": session["ship"],
-                "order_number": session.get("order_number"),
-                "repair_item": session["item_number"],
-                "manager": session.get("manager_name"),
-                "equipment": session["equipment"],
-                "repair_category": session.get("repair_type") or "Текущий ремонт",
-                "work_summary": f"Дефектация: {PROFILE_LABELS.get(profile, PROFILE_LABELS['general'])}",
-                "basis": basis,
-                "rows": rows,
-                "conclusion": (
-                    "Выявленные дефекты подлежат устранению согласно указанному "
-                    "объёму ремонтных работ. После ремонта выполнить сборку, "
-                    "регулировку и контрольные испытания."
-                ),
-                "contractor_name": session.get("contractor_name"),
-            })
+            file_bytes, work_volume = build_act_file(session)
             session["last_file"] = file_bytes
             session["work_volume"] = work_volume
             _save_session(chat_id, session)
