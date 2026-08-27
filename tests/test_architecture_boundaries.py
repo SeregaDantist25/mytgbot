@@ -50,3 +50,11 @@ def test_obsolete_patch_and_empty_callback_modules_are_removed():
         "Новый текстовый документ.txt",
     ]
     assert all(not (ROOT / relative_path).exists() for relative_path in obsolete)
+
+
+def test_message_handlers_use_dedicated_chat_state_service():
+    source = (ROOT / "handlers" / "message_handlers.py").read_text(encoding="utf-8")
+    assert "from services.chat_state_service import" in source
+    extra_import = source.split("from services.extra import (", 1)[1].split(")", 1)[0]
+    assert "get_chat_state" not in extra_import
+    assert "set_chat_state" not in extra_import

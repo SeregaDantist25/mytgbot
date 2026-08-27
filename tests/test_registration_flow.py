@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import bot_context
 from handlers.message_handlers import register_message_handlers
-from services.extra import get_chat_state, set_chat_state
+from services.chat_state_service import get_chat_state, set_chat_state
 from services.user_service import (
     add_pending_user,
     create_user,

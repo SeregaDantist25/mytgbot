@@ -20,7 +20,6 @@ import re
 import json
 import time
 import sqlite3
-import threading
 import subprocess
 import logging
 from datetime import datetime
@@ -40,6 +39,7 @@ from services.document_service import (
     archive_document,
     delete_document,
 )
+from services.chat_state_service import get_chat_state, set_chat_state
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,6 @@ SHIPS_FILE = os.path.join(DATA_DIR, "ships.json")
 COMPANIES_FILE = os.path.join(DATA_DIR, "companies.json")
 EMPLOYEES_FILE = os.path.join(DATA_DIR, "employees.json")
 COUNTERS_DB = os.path.join(DATA_DIR, "counters.db")
-CHAT_STATE_FILE = os.path.join(DATA_DIR, "chat_state.json")
 
 # Полный путь к git (в PATH его может не быть)
 _GIT_EXE = r"C:\Program Files\Git\bin\git.exe"
@@ -330,56 +329,6 @@ def update_counter(doc_type: str, new_number: int) -> None:
     )
     conn.commit()
     conn.close()
-
-
-# ============================================================
-#  ПЕРСИСТЕНТНОЕ ХРАНИЛИЩЕ СОСТОЯНИЯ ДИАЛОГА
-# ============================================================
-
-_chat_state_lock = threading.Lock()
-
-
-def _load_chat_state() -> dict:
-    """Загружает chat_state.json в память (с блокировкой)."""
-    with _chat_state_lock:
-        if not os.path.exists(CHAT_STATE_FILE):
-            return {}
-        try:
-            with open(CHAT_STATE_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
-            return {}
-
-
-def _save_chat_state(state: dict) -> None:
-    """Сохраняет chat_state.json на диск (с блокировкой)."""
-    with _chat_state_lock:
-        if not os.path.exists(DATA_DIR):
-            os.makedirs(DATA_DIR)
-        tmp = CHAT_STATE_FILE + ".tmp"
-        with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump(state, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, CHAT_STATE_FILE)
-
-
-_chat_state = _load_chat_state()
-
-
-def get_chat_state(chat_id, key: str):
-    """Возвращает значение состояния для чата (или None)."""
-    return _chat_state.get(str(chat_id), {}).get(key)
-
-
-def set_chat_state(chat_id, key: str, value) -> None:
-    """Устанавливает значение состояния для чата и сохраняет на диск."""
-    cid = str(chat_id)
-    if cid not in _chat_state:
-        _chat_state[cid] = {}
-    if value is None:
-        _chat_state[cid].pop(key, None)
-    else:
-        _chat_state[cid][key] = value
-    _save_chat_state(_chat_state)
 
 
 # ============================================================

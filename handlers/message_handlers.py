@@ -26,8 +26,6 @@ import services.user_service as us
 from services.extra import (
     load_ships,
     add_ship,
-    get_chat_state,
-    set_chat_state,
     detect_ship,
     detect_pump_type,
     detect_equipment_type,
@@ -41,6 +39,7 @@ from services.extra import (
     can_upload_repair_list,
     save_repair_items_to_db,
 )
+from services.chat_state_service import get_chat_state, set_chat_state
 from services.document_builder import create_defect_document, create_avr_document
 from models import SessionLocal, Ship
 
