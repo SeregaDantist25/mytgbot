@@ -24,7 +24,6 @@ import document_commands
 import services.user_service as us
 
 from services.extra import (
-    load_ships,
     add_ship,
     detect_ship,
     detect_pump_type,
@@ -35,10 +34,10 @@ from services.extra import (
     generate_work_volume,
     generate_base_work_volume,
     get_user_role,
-    find_employee_role,
     can_upload_repair_list,
     save_repair_items_to_db,
 )
+from services.catalog_service import find_employee_role, load_ships
 from services.chat_state_service import get_chat_state, set_chat_state
 from services.document_builder import create_defect_document, create_avr_document
 from models import SessionLocal, Ship

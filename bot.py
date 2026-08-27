@@ -110,7 +110,7 @@ logger.info("Зарегистрированы группы обработчик�
 #  ЗАПУСК С ПОВТОРНЫМИ ПОПЫТКАМИ
 # ============================================================
 
-from services.extra import load_ships
+from services.catalog_service import load_ships
 from models import init_models, sync_ships_from_json
 import document_commands
 

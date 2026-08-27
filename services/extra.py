@@ -22,7 +22,6 @@ import time
 import subprocess
 import logging
 from datetime import datetime
-from typing import Optional
 
 from docx import Document as DocxDocument
 
@@ -44,17 +43,23 @@ from services.document_counter_service import (
     get_next_number,
     update_counter,
 )
+from services.catalog_service import (
+    CHECKLISTS_FILE,
+    COMPANIES_FILE,
+    EMPLOYEES_FILE,
+    SHIPS_FILE,
+    find_employee_role,
+    load_checklists,
+    load_companies,
+    load_employees,
+    load_ships,
+)
 
 logger = logging.getLogger(__name__)
 
 # --- Пути к файлам ---
 TEMPLATES_DIR = os.getenv("TEMPLATES_DIR", "templates")
 DATA_DIR = os.getenv("DATA_DIR", "data")
-CHECKLISTS_FILE = os.path.join(DATA_DIR, "checklists.json")
-SHIPS_FILE = os.path.join(DATA_DIR, "ships.json")
-COMPANIES_FILE = os.path.join(DATA_DIR, "companies.json")
-EMPLOYEES_FILE = os.path.join(DATA_DIR, "employees.json")
-
 # Полный путь к git (в PATH его может не быть)
 _GIT_EXE = r"C:\Program Files\Git\bin\git.exe"
 
@@ -62,77 +67,6 @@ _GIT_EXE = r"C:\Program Files\Git\bin\git.exe"
 # ============================================================
 #  ЗАГРУЗКА ДАННЫХ ИЗ JSON
 # ============================================================
-
-def load_checklists() -> dict:
-    """Загружает чек-листы из data/checklists.json."""
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
-    if not os.path.exists(CHECKLISTS_FILE):
-        return {}
-    try:
-        with open(CHECKLISTS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def load_ships() -> dict:
-    """Загружает словарь судов из data/ships.json."""
-    if not os.path.exists(SHIPS_FILE):
-        return {}
-    with open(SHIPS_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-
-def load_employees() -> list:
-    """Загружает список сотрудников из data/employees.json.
-
-    Returns:
-        Список словарей вида {"name": str, "role": str}.
-    """
-    if not os.path.exists(EMPLOYEES_FILE):
-        return []
-    try:
-        with open(EMPLOYEES_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return data.get("employees", [])
-    except Exception:
-        return []
-
-
-def find_employee_role(name: str) -> Optional[str]:
-    """Ищет роль сотрудника по ФИО (без учёта регистра).
-
-    Args:
-        name: ФИО пользователя.
-
-    Returns:
-        Роль сотрудника или None, если ФИО не найдено.
-    """
-    if not name:
-        return None
-    normalized = " ".join(name.strip().lower().split())
-    for emp in load_employees():
-        emp_name = " ".join(str(emp.get("name", "")).strip().lower().split())
-        if emp_name == normalized:
-            return emp.get("role")
-    return None
-
-
-def load_companies() -> dict:
-    """Загружает дефолтные executor/customer/location из data/companies.json."""
-    defaults = {
-        "executor": "ООО «Новое время»",
-        "customer": "АО «Бункерная компания»",
-        "location": "Рейд 4ый район, г. Находка",
-    }
-    if not os.path.exists(COMPANIES_FILE):
-        return defaults
-    with open(COMPANIES_FILE, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    defaults.update(data)
-    return defaults
-
 
 # ============================================================
 #  БАЗА ДАННЫХ НАСОСОВ

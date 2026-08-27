@@ -63,3 +63,12 @@ def test_message_handlers_use_dedicated_chat_state_service():
 def test_document_builder_uses_dedicated_counter_service():
     source = (ROOT / "services" / "document_builder.py").read_text(encoding="utf-8")
     assert "from services.document_counter_service import get_next_number" in source
+
+
+def test_active_modules_use_dedicated_catalog_service():
+    sources = [
+        (ROOT / "bot.py").read_text(encoding="utf-8"),
+        (ROOT / "handlers" / "message_handlers.py").read_text(encoding="utf-8"),
+        (ROOT / "services" / "document_builder.py").read_text(encoding="utf-8"),
+    ]
+    assert all("from services.catalog_service import" in source for source in sources)
