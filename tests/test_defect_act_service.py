@@ -5,6 +5,7 @@ from io import BytesIO
 from openpyxl import load_workbook
 
 from services.defect_act_service import DefectActError, generate_defect_act
+from services.defect_profiles import build_defect_rows, detect_defect_profile
 
 
 def test_generate_defect_act_fills_template():
@@ -45,3 +46,18 @@ def test_generate_defect_act_expands_table():
     result = generate_defect_act({"rows": [{"defect": str(i)} for i in range(15)]})
     sheet = load_workbook(BytesIO(result))["Акт дефектации"]
     assert sheet["B28"].value == "14"
+
+
+def test_pipeline_profile_uses_flat_rows():
+    profile = detect_defect_profile("Трубопровод охлаждения Ø57 мм")
+    rows = build_defect_rows("Трубопровод", ["Сквозная коррозия"], "Замена", profile)
+    assert profile == "pipeline"
+    assert rows[0]["num"] == "1"
+    assert "остаточную толщину" in rows[0]["work"]
+
+
+def test_gear_profile_uses_hierarchical_rows():
+    profile = detect_defect_profile("Редуктор брашпиля")
+    rows = build_defect_rows("Редуктор брашпиля", ["Износ зубьев"], "Разобрать", profile)
+    assert profile == "deck_machinery"
+    assert [row["num"] for row in rows] == ["1", "1.1"]

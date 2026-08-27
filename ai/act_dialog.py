@@ -7,7 +7,7 @@
    дефектации (AI)" у пункта ведомости.
 2. Бот определяет оборудование по описанию пункта и подбирает применимые ГОСТы.
 3. Бот задаёт уточняющие вопросы (дефекты, тип ремонта, доп. детали).
-4. Бот генерирует акт дефектации (по шаблону templates/defect_act_template.docx
+4. Бот генерирует акт дефектации (по шаблону templates/defect_act_template.xlsx
    + Алиса/YandexGPT) и отправляет файл.
 5. Пользователь подтверждает/правит/удаляет акт. При правке бот уточняет,
    что именно исправить, и повторяет генерацию — не более MAX_EDITS раз,
@@ -36,7 +36,13 @@ from services.extra import (
     generate_work_volume,
     get_user_role,
 )
-from services.document_builder import create_defect_document
+from services.defect_act_service import generate_defect_act
+from services.defect_profiles import (
+    PROFILE_LABELS,
+    build_defect_rows,
+    detect_defect_profile,
+    get_profile_question,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -195,17 +201,26 @@ def register_act_dialog_handlers(bot):
 
             basis = f"Ремонтная ведомость судна «{session['ship']}», пункт {session['item_number']}"
 
-            file_stream = create_defect_document(
-                session["ship"],
-                session["equipment"],
-                session["defects"],
-                work_volume,
-                pump_type=session.get("pump_type"),
-                repair_type=session.get("repair_type"),
-                purpose="Определение технического состояния и объёма ремонта",
-                basis=basis,
+            profile = detect_defect_profile(session["equipment"])
+            rows = build_defect_rows(
+                session["equipment"], session["defects"], work_volume, profile
             )
-            file_bytes = file_stream.getvalue()
+            file_bytes = generate_defect_act({
+                "act_number": session["item_number"],
+                "act_date": datetime.now().strftime("%d.%m.%Y"),
+                "ship": session["ship"],
+                "repair_item": session["item_number"],
+                "equipment": session["equipment"],
+                "repair_category": session.get("repair_type") or "Текущий ремонт",
+                "work_summary": f"Дефектация: {PROFILE_LABELS.get(profile, PROFILE_LABELS['general'])}",
+                "basis": basis,
+                "rows": rows,
+                "conclusion": (
+                    "Выявленные дефекты подлежат устранению согласно указанному "
+                    "объёму ремонтных работ. После ремонта выполнить сборку, "
+                    "регулировку и контрольные испытания."
+                ),
+            })
             session["last_file"] = file_bytes
             session["work_volume"] = work_volume
             _save_session(chat_id, session)
@@ -223,7 +238,7 @@ def register_act_dialog_handlers(bot):
             bot.send_document(
                 chat_id,
                 BytesIO(file_bytes),
-                visible_file_name=f'Акт_дефектации_{session["item_number"]}_{session["ship"]}.docx',
+                visible_file_name=f'Акт_дефектации_{session["item_number"]}_{session["ship"]}.xlsx',
                 caption=caption,
                 reply_markup=markup,
             )
@@ -260,6 +275,7 @@ def register_act_dialog_handlers(bot):
 
         equipment = item["description"] or f"Пункт {item['item_number']}"
         equipment_type = detect_equipment_type(equipment) or "pump"
+        defect_profile = detect_defect_profile(equipment)
         pump_type = detect_pump_type(equipment)
         gosts = _find_relevant_gosts(equipment)
 
@@ -287,7 +303,9 @@ def register_act_dialog_handlers(bot):
         msg = bot.send_message(
             chat_id,
             f"🧠 Готовлю акт дефектации по пункту {item['item_number']} «{equipment}» "
-            f"(судно «{ship or 'не указано'}»).{gost_text}\n\n"
+            f"(судно «{ship or 'не указано'}»).\n"
+            f"Профиль: {PROFILE_LABELS.get(defect_profile, PROFILE_LABELS['general'])}."
+            f"{gost_text}\n\n"
             "❓ Опишите обнаруженные дефекты/неисправности (можно списком через запятую "
             "или с новой строки):",
         )
@@ -323,10 +341,12 @@ def register_act_dialog_handlers(bot):
         session["repair_type"] = (message.text or "Текущий ремонт").strip()
         _save_session(chat_id, session)
 
+        profile = detect_defect_profile(session["equipment"])
         msg = bot.send_message(
             chat_id,
-            "❓ Есть дополнительные технические детали (тип насоса/оборудования, размеры, "
-            "особые требования)? Если нет — напишите «нет».",
+            "❓ Укажите дополнительные технические данные.\n\n"
+            f"{get_profile_question(profile)}\n\n"
+            "Если данных нет — напишите «нет».",
         )
         bot.register_next_step_handler(msg, _step_ask_extra)
 
@@ -363,7 +383,7 @@ def register_act_dialog_handlers(bot):
             return
 
         result = storage.save_document(
-            file_name=f'Акт_дефектации_{session["item_number"]}.docx',
+            file_name=f'Акт_дефектации_{session["item_number"]}.xlsx',
             file_content=session["last_file"],
             item_id=session["item_id"],
             category="defect_act",
