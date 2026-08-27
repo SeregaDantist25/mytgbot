@@ -15,6 +15,7 @@ def test_container_starts_through_validated_manage_command():
 def test_worker_procfile_matches_container_entrypoint():
     procfile = (ROOT / "Procfile").read_text(encoding="utf-8").strip()
     assert procfile == "worker: python manage.py run"
+    assert not (ROOT / "Procfile.txt").exists()
 
 
 def test_deployment_files_do_not_contain_secret_values():

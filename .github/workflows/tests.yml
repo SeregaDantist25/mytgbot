@@ -19,3 +19,10 @@ jobs:
         env:
           DATABASE_URL: sqlite:///data/test_suite.db
           LOG_FILE: ""
+
+  container:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag mytgbot-ci .
