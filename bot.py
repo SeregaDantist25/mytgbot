@@ -230,7 +230,13 @@ if __name__ == '__main__':
     from services.extra import handle_document_approve, handle_document_archive, handle_document_delete
     document_commands.register_document_commands(
         bot, bot_context.ADMIN_IDS,
-        handle_document_approve, handle_document_archive, handle_document_delete,
+        handle_document_approve,
+        lambda document_id, user_id: handle_document_archive(
+            document_id, user_id, bot_context.ADMIN_IDS
+        ),
+        lambda document_id, user_id: handle_document_delete(
+            document_id, user_id, bot_context.ADMIN_IDS
+        ),
     )
 
     # Регистрация команд управления заявками на ремонт

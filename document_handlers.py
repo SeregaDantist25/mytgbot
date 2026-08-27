@@ -9,9 +9,27 @@ from telebot import types
 from document_states import DocumentStates
 from models import SessionLocal, Document, StatementItem
 from file_storage import storage
+from services.document_service import delete_document
+from services.user_service import get_user
+import bot_context
 import os
 
 logger = logging.getLogger(__name__)
+
+DOCUMENT_MANAGER_ROLES = {
+    "engineer",
+    "engineer_technologist",
+    "director",
+    "builder",
+}
+
+
+def _can_manage_documents(user_id):
+    """Проверить доступ к загрузке, замене и удалению документов."""
+    if user_id in bot_context.ADMIN_IDS:
+        return True
+    user = get_user(user_id)
+    return bool(user and user.approved and user.role in DOCUMENT_MANAGER_ROLES)
 
 
 def register_document_handlers(bot):
@@ -25,6 +43,9 @@ def register_document_handlers(bot):
     def handle_upload_button(call):
         """Обработчик кнопки 'Загрузить документ'."""
         try:
+            if not _can_manage_documents(call.from_user.id):
+                bot.answer_callback_query(call.id, "🚫 Недостаточно прав", show_alert=True)
+                return
             item_id = int(call.data.split("_")[1])
             
             # Проверяем, что пункт существует
@@ -86,6 +107,10 @@ def register_document_handlers(bot):
     def handle_file_upload(message):
         """Обработчик загрузки файла."""
         try:
+            if not _can_manage_documents(message.from_user.id):
+                bot.reply_to(message, "🚫 Недостаточно прав для загрузки документов")
+                bot.delete_state(message.from_user.id)
+                return
             with bot.retrieve_data(message.from_user.id) as data:
                 item_id = data.get('item_id')
                 category = data.get('category')
@@ -138,6 +163,9 @@ def register_document_handlers(bot):
     def handle_replace_button(call):
         """Обработчик кнопки 'Заменить'."""
         try:
+            if not _can_manage_documents(call.from_user.id):
+                bot.answer_callback_query(call.id, "🚫 Недостаточно прав", show_alert=True)
+                return
             doc_id = int(call.data.split("_")[1])
             
             # Проверяем, что документ существует и это draft
@@ -175,6 +203,10 @@ def register_document_handlers(bot):
     def handle_file_replacement(message):
         """Обработчик замены файла."""
         try:
+            if not _can_manage_documents(message.from_user.id):
+                bot.reply_to(message, "🚫 Недостаточно прав для замены документов")
+                bot.delete_state(message.from_user.id)
+                return
             with bot.retrieve_data(message.from_user.id) as data:
                 doc_id = data.get('doc_id')
                 item_id = data.get('item_id')
@@ -226,6 +258,9 @@ def register_document_handlers(bot):
     def handle_delete_button(call):
         """Обработчик кнопки 'Удалить'."""
         try:
+            if not _can_manage_documents(call.from_user.id):
+                bot.answer_callback_query(call.id, "🚫 Недостаточно прав", show_alert=True)
+                return
             doc_id = int(call.data.split("_")[1])
             
             # Проверяем, что документ существует
@@ -265,33 +300,30 @@ def register_document_handlers(bot):
     def handle_delete_confirmation(call):
         """Обработчик подтверждения удаления."""
         try:
+            if not _can_manage_documents(call.from_user.id):
+                bot.delete_state(call.from_user.id)
+                bot.answer_callback_query(call.id, "🚫 Недостаточно прав", show_alert=True)
+                return
             doc_id = int(call.data.split("_")[2])
-            
-            # Удаляем документ
-            session = SessionLocal()
-            doc = session.query(Document).filter_by(id=doc_id).first()
-            
-            if doc:
-                # Удаляем файл из хранилища
-                try:
-                    storage.delete_file(doc.file_ref)
-                except Exception as e:
-                    logger.warning(f"Failed to delete file {doc.file_ref}: {e}")
-                
-                # Удаляем запись из БД
-                session.delete(doc)
-                session.commit()
-            
-            session.close()
+
+            success, message = delete_document(
+                doc_id,
+                call.from_user.id,
+                admin_ids=bot_context.ADMIN_IDS,
+            )
             
             # Выходим из состояния
             bot.delete_state(call.from_user.id)
             
             bot.edit_message_text(
-                "✅ Документ удалён успешно!",
+                message,
                 call.message.chat.id,
                 call.message.message_id
             )
+            if success:
+                bot.answer_callback_query(call.id)
+            else:
+                bot.answer_callback_query(call.id, message, show_alert=True)
             
         except Exception as e:
             bot.answer_callback_query(call.id, f"❌ Ошибка: {str(e)}", show_alert=True)
