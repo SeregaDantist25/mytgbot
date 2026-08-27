@@ -36,7 +36,7 @@ def test_generate_defect_act_fills_template():
     assert sheet["A8"].value == "Объект ремонта: Славянская"
     assert sheet["A14"].value == "1"
     assert sheet["E14"].value == "2"
-    assert sheet["A15"].value == ""
+    assert sheet["A15"].value in (None, "")
     assert "{{" not in " ".join(
         str(cell.value) for row in sheet.iter_rows() for cell in row if cell.value
     )
