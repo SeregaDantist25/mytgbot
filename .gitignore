@@ -16,3 +16,7 @@ data/documents/
 
 # Логи
 bot.log
+
+# Сформированные документы и результаты OCR
+runtime/
+ocr_output/
