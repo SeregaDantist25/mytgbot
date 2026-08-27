@@ -48,6 +48,7 @@ from services.catalog_service import (
     load_ships,
 )
 from services.template_service import load_template, replace_placeholders
+from services.pump_knowledge_service import PumpDatabase, pump_db
 
 logger = logging.getLogger(__name__)
 
@@ -55,84 +56,6 @@ logger = logging.getLogger(__name__)
 DATA_DIR = os.getenv("DATA_DIR", "data")
 # Полный путь к git (в PATH его может не быть)
 _GIT_EXE = r"C:\Program Files\Git\bin\git.exe"
-
-
-# ============================================================
-#  ЗАГРУЗКА ДАННЫХ ИЗ JSON
-# ============================================================
-
-# ============================================================
-#  БАЗА ДАННЫХ НАСОСОВ
-# ============================================================
-
-class PumpDatabase:
-    """База знаний по насосам (чек-листы, зазоры, дефекты)."""
-
-    def __init__(self) -> None:
-        self.data = load_checklists()
-
-    def get_pump_types(self) -> list:
-        return list(self.data.keys())
-
-    def get_pump_name(self, pump_type: str) -> str:
-        return self.data.get(pump_type, {}).get("name", pump_type)
-
-    def get_checklist(self, pump_type: str) -> list:
-        return self.data.get(pump_type, {}).get("items", [])
-
-    def get_clearances(self, pump_type: str, clearance_type: str):
-        clearances = self.data.get(pump_type, {}).get("clearances", {})
-        return clearances.get(clearance_type)
-
-    def check_clearance(self, pump_type: str, clearance_type: str, measured_value: float) -> dict:
-        clearance_data = self.get_clearances(pump_type, clearance_type)
-        if not clearance_data:
-            return {
-                "status": "unknown",
-                "message": f"Данные по зазору '{clearance_type}' для '{pump_type}' отсутствуют",
-                "action": "Проверьте правильность ввода",
-            }
-
-        standard_min = clearance_data.get("min", 0)
-        standard_max = clearance_data.get("max", 0)
-        unit = clearance_data.get("unit", "мм")
-
-        if "мм/мм" in unit:
-            return {
-                "status": "info",
-                "message": f"📌 Зазор зависит от диаметра: {standard_min}-{standard_max} {unit}",
-                "action": "Уточните диаметр для точного расчёта",
-            }
-
-        if measured_value < standard_min:
-            return {
-                "status": "warning",
-                "message": f"⚠️ Зазор МЕНЬШЕ нормы: {measured_value} мм (норма: {standard_min}-{standard_max} мм)",
-                "action": "Проверьте точность измерения",
-            }
-        elif measured_value <= standard_max:
-            return {
-                "status": "ok",
-                "message": f"✅ Зазор В НОРМЕ: {measured_value} мм (норма: {standard_min}-{standard_max} мм)",
-                "action": "Деталь работоспособна",
-            }
-        else:
-            return {
-                "status": "critical",
-                "message": f"🔴 Зазор ПРЕВЫШЕН: {measured_value} мм (норма: {standard_min}-{standard_max} мм)",
-                "action": "Требуется ремонт",
-            }
-
-    def get_common_defects(self, pump_type: str) -> list:
-        return self.data.get(pump_type, {}).get("defects", [])
-
-    def get_repair_method(self, pump_type: str, defect_text: str):
-        defect_lower = defect_text.lower()
-        methods = self.data.get(pump_type, {}).get("repair_methods", {})
-        for key, method in methods.items():
-            if key in defect_lower:
-                return method
-        return None
 
 
 # ============================================================
@@ -712,7 +635,3 @@ def build_defect_table_engine(defects: list, work_volume: str) -> list:
         })
 
     return rows
-
-
-# Экземпляр базы данных насосов (для обратной совместимости)
-pump_db = PumpDatabase()

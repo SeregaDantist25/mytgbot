@@ -92,3 +92,8 @@ def test_active_modules_do_not_import_roles_or_repair_storage_from_extra():
     for module in modules:
         source = module.read_text(encoding="utf-8")
         assert "from services.user_service import" in source
+
+
+def test_bot_uses_dedicated_pump_knowledge_service():
+    source = (ROOT / "bot.py").read_text(encoding="utf-8")
+    assert "from services.pump_knowledge_service import pump_db" in source

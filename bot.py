@@ -82,7 +82,7 @@ except Exception as e:
     logger.warning(f"Ошибка при загрузке создателя актов: {e}")
 
 # --- База данных насосов ---
-from services.extra import pump_db
+from services.pump_knowledge_service import pump_db
 bot_context.pump_db = pump_db
 
 # --- Новые модули для документооборота ---
