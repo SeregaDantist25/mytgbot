@@ -20,7 +20,6 @@ from telebot import types
 
 import db
 import bot_context
-import navigation
 import document_commands
 import services.user_service as us
 

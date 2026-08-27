@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""
-Функции навигации по пунктам ремонтной ведомости и документам.
-Используют ORM (models.py) для получения данных из БД.
+"""Навигация по категориям и версиям документов.
+
+Навигация по ремонтной ведомости находится в ``document_manager.py`` и
+``bot_handlers_new.py``. Здесь остаются только запросы и клавиатуры документов,
+чтобы две реализации разделов/пунктов не расходились.
 """
 
 from telebot import types
-from models import SessionLocal, Ship, StatementItem, RepairStatement, Document
-from document_manager import section_hash as stable_section_hash
+from models import SessionLocal, StatementItem, Document
 
 
 # Категории документов
@@ -15,91 +16,6 @@ DOCUMENT_CATEGORIES = {
     "avr": "⚙️ АВР",
     "other": "📄 Прочее"
 }
-
-
-def get_sections_for_ship(ship_id):
-    """Получить уникальные разделы для судна."""
-    session = SessionLocal()
-    try:
-        items = session.query(StatementItem.section).filter(
-            StatementItem.statement_id.in_(
-                session.query(RepairStatement.id).filter_by(ship_id=ship_id)
-            )
-        ).distinct().all()
-        return [s[0] for s in items if s[0]]
-    finally:
-        session.close()
-
-
-def get_items_for_section(ship_id, section):
-    """Получить пункты в разделе."""
-    session = SessionLocal()
-    try:
-        items = session.query(StatementItem).filter(
-            StatementItem.statement_id.in_(
-                session.query(RepairStatement.id).filter_by(ship_id=ship_id)
-            ),
-            StatementItem.section == section
-        ).all()
-        return items
-    finally:
-        session.close()
-
-
-def build_sections_keyboard(ship_id, page=0, items_per_page=10):
-    """Построить InlineKeyboardMarkup со списком разделов (с пагинацией)."""
-    sections = get_sections_for_ship(ship_id)
-    
-    if not sections:
-        return None
-    
-    # Пагинация
-    start = page * items_per_page
-    end = start + items_per_page
-    page_sections = sections[start:end]
-    
-    keyboard = types.InlineKeyboardMarkup()
-    for section in page_sections:
-        # Callback: sections_<ship_id>_<section_hash>
-        # Используем хеш раздела, чтобы не превышать 64 байта
-        callback = f"section_{ship_id}_{stable_section_hash(section)}"
-        keyboard.add(types.InlineKeyboardButton(section, callback_data=callback))
-    
-    # Кнопки пагинации
-    if page > 0:
-        keyboard.add(types.InlineKeyboardButton("◀ Назад", callback_data=f"sections_{ship_id}_{page-1}"))
-    if end < len(sections):
-        keyboard.add(types.InlineKeyboardButton("Далее ▶", callback_data=f"sections_{ship_id}_{page+1}"))
-    
-    return keyboard
-
-
-def build_items_keyboard(ship_id, section, page=0, items_per_page=10):
-    """Построить InlineKeyboardMarkup со списком пунктов в разделе."""
-    items = get_items_for_section(ship_id, section)
-    
-    if not items:
-        return None
-    
-    # Пагинация
-    start = page * items_per_page
-    end = start + items_per_page
-    page_items = items[start:end]
-    
-    keyboard = types.InlineKeyboardMarkup()
-    for item in page_items:
-        # Callback: item_<item_id>
-        callback = f"item_{item.id}"
-        label = f"{item.item_number}: {item.description[:30]}..."
-        keyboard.add(types.InlineKeyboardButton(label, callback_data=callback))
-    
-    # Кнопки пагинации
-    if page > 0:
-        keyboard.add(types.InlineKeyboardButton("◀ Назад", callback_data=f"items_{ship_id}_{stable_section_hash(section)}_{page-1}"))
-    if end < len(items):
-        keyboard.add(types.InlineKeyboardButton("Далее ▶", callback_data=f"items_{ship_id}_{stable_section_hash(section)}_{page+1}"))
-    
-    return keyboard
 
 
 def get_item_details(item_id):
