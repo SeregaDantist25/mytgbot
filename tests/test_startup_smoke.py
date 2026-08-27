@@ -23,6 +23,9 @@ def test_application_imports_and_registers_handlers(tmp_path):
         "assert {'handle_categories_button', 'handle_documents_button', "
         "'handle_document_details', 'handle_document_approve', "
         "'handle_document_archive', 'handle_document_download'} <= names; "
+        "assert bot.REGISTERED_HANDLER_GROUPS == "
+        "('messages', 'documents', 'document_categories', 'repair_upload', "
+        "'repair_navigation', 'defect_act_dialog'); "
         "assert bot.bot_context.DOCUMENT_MANAGER_AVAILABLE"
     )
     result = subprocess.run(

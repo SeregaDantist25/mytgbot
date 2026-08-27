@@ -13,6 +13,10 @@ class AlisaActCreator:
         self.templates_dir = "templates"
         self.examples_dir = "data/act_examples"
         print(f"🔧 AlisaActCreator инициализирован. API Key: {'есть' if self.api_key else 'НЕТ'}")
+
+    def is_configured(self) -> bool:
+        """Готов ли внешний YandexGPT к генерации данных акта."""
+        return bool(self.api_key and self.folder_id)
     
     def _load_template_text(self) -> str:
         """Загружает текст шаблона для контекста Алисы"""

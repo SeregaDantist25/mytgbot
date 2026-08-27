@@ -98,30 +98,13 @@ except ImportError as e:
 #  РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ
 # ============================================================
 
-from handlers.message_handlers import register_message_handlers
-from handlers.callback_handlers import register_callback_handlers
-from handlers.document_handlers import register_document_handlers
-from category_handlers import register_category_handlers
-from handlers.error_handlers import setup_error_handlers
+from handlers.registry import register_all_handlers
 
-register_message_handlers(bot)
-register_callback_handlers(bot)
-register_document_handlers(bot)
-register_category_handlers(bot)
-setup_error_handlers(bot)
-
-# Регистрируем обработчики загрузки ремонтной ведомости и навигации
-if bot_context.DOCUMENT_MANAGER_AVAILABLE:
-    bot_handlers_new.register_upload_handlers(bot)
-    bot_handlers_new.register_navigation_handlers(bot)
-
-# Диалог создания акта дефектации через AI (кнопка у пункта ведомости)
-try:
-    from ai.act_dialog import register_act_dialog_handlers
-    register_act_dialog_handlers(bot)
-    logger.info("Диалог создания акта дефектации через AI зарегистрирован.")
-except Exception as e:
-    logger.warning(f"Диалог создания акта дефектации через AI не загружен: {e}")
+REGISTERED_HANDLER_GROUPS = register_all_handlers(
+    bot,
+    document_manager_available=bot_context.DOCUMENT_MANAGER_AVAILABLE,
+)
+logger.info("Зарегистрированы группы обработчиков: %s", REGISTERED_HANDLER_GROUPS)
 
 # ============================================================
 #  ЗАПУСК С ПОВТОРНЫМИ ПОПЫТКАМИ
@@ -176,12 +159,12 @@ if __name__ == '__main__':
     logger.info("Типы оборудования в базе: насосы (центробежные, шестерёнчатые, поршневые), двигатели")
     logger.info("Доступные функции: ДА, АВР, проверка зазоров, дефекты, нормативы, чек-лист")
 
-    if bot_context.alisa_router:
+    if bot_context.alisa_router and bot_context.alisa_router.is_configured():
         logger.info("Алиса (YandexGPT) активна — все запросы проходят через неё!")
     else:
         logger.warning("Алиса НЕ загружена — работаю в локальном режиме")
 
-    if bot_context.alisa_act_creator:
+    if bot_context.alisa_act_creator and bot_context.alisa_act_creator.is_configured():
         logger.info("Создатель актов через Алису загружен!")
     else:
         logger.warning("Создатель актов через Алису НЕ загружен")

@@ -11,14 +11,10 @@
 - error_handlers — глобальная обработка ошибок
 """
 
-from . import message_handlers
-from . import callback_handlers
-from . import document_handlers
-from . import error_handlers
-
 __all__ = [
     'message_handlers',
     'callback_handlers',
     'document_handlers',
     'error_handlers',
+    'registry',
 ]
