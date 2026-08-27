@@ -1,27 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-Прочая вспомогательная бизнес-логика, вынесенная из bot.py.
+Совместимый фасад и оставшаяся инженерная обработка текста.
 
-Содержит:
-- загрузку данных из JSON (чек-листы, суда, компании)
-- класс PumpDatabase (база знаний по насосам)
-- работу с шаблонами Word и плейсхолдерами
-- счётчики документов (counters.db)
-- персистентное состояние диалога (chat_state.json)
-- git-хелперы (автокоммит/автопуш конфигов)
-- добавление судов и компаний
-- детекцию и парсинг текста (оборудование, судно, дефекты, зазоры, АВР)
-- генерацию объёма работ и таблиц дефектации
-- функции ORM (загрузка ремонтной ведомости, роли, версионирование)
+Новые модули импортируют специализированные сервисы напрямую. Переэкспорты
+здесь временно сохраняют работу старых интеграций до завершения миграции.
 """
 
-import os
 import re
-import json
-import time
-import subprocess
 import logging
-from datetime import datetime
 
 from services.document_service import (
     approve_document as handle_document_approve,
@@ -41,6 +27,8 @@ from services.catalog_service import (
     COMPANIES_FILE,
     EMPLOYEES_FILE,
     SHIPS_FILE,
+    add_company,
+    add_ship,
     find_employee_role,
     load_checklists,
     load_companies,
@@ -51,79 +39,6 @@ from services.template_service import load_template, replace_placeholders
 from services.pump_knowledge_service import PumpDatabase, pump_db
 
 logger = logging.getLogger(__name__)
-
-# --- Пути к файлам ---
-DATA_DIR = os.getenv("DATA_DIR", "data")
-# Полный путь к git (в PATH его может не быть)
-_GIT_EXE = r"C:\Program Files\Git\bin\git.exe"
-
-
-# ============================================================
-#  GIT: АВТОКОММИТ И АВТОПУШ КОНФИГОВ
-# ============================================================
-
-def _git(*args) -> tuple:
-    """Выполняет git-команду и возвращает (returncode, output)."""
-    try:
-        result = subprocess.run(
-            [_GIT_EXE] + list(args),
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-        )
-        return result.returncode, (result.stdout + result.stderr).strip()
-    except Exception as e:
-        return 1, str(e)
-
-
-def git_commit_and_push(files: list, message: str) -> tuple:
-    """Добавляет файлы, коммитит и пушит. Возвращает (ok, text)."""
-    code, out = _git("add", "--", *files)
-    if code != 0:
-        return False, f"git add: {out}"
-    code, out = _git("commit", "-m", message)
-    if code != 0 and "nothing to commit" not in out.lower():
-        return False, f"git commit: {out}"
-    code, out = _git("push", "origin", "master")
-    if code != 0:
-        return False, f"git push: {out}"
-    return True, out
-
-
-# ============================================================
-#  ДОБАВЛЕНИЕ СУДОВ И КОМПАНИЙ (С АВТОПУШЕМ)
-# ============================================================
-
-def add_ship(name: str) -> tuple:
-    """Добавляет судно в ships.json и пушит. Возвращает (ok, text)."""
-    name = name.strip()
-    if not name:
-        return False, "Пустое название судна."
-    ships = load_ships()
-    key = name.lower()
-    if key in ships:
-        return False, f"Судно «{name}» уже есть в списке."
-    ships[key] = name
-    with open(SHIPS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(ships, f, ensure_ascii=False, indent=2)
-    ok, text = git_commit_and_push([SHIPS_FILE], f"feat: добавить судно {name}")
-    if ok:
-        return True, f"✅ Судно «{name}» добавлено и запушено в репозиторий."
-    return True, f"✅ Судно «{name}» добавлено в файл, но пуш не удался: {text}"
-
-
-def add_company(field: str, value: str) -> tuple:
-    """Обновляет поле компании (executor/customer/location) и пушит."""
-    value = value.strip()
-    if not value:
-        return False, "Пустое значение."
-    companies = load_companies()
-    companies[field] = value
-    with open(COMPANIES_FILE, 'w', encoding='utf-8') as f:
-        json.dump(companies, f, ensure_ascii=False, indent=2)
-    ok, text = git_commit_and_push([COMPANIES_FILE], f"feat: обновить {field} в companies.json")
-    if ok:
-        return True, f"✅ Поле «{field}» обновлено и запушено в репозиторий."
-    return True, f"✅ Поле «{field}» обновлено в файле, но пуш не удался: {text}"
-
 
 # ============================================================
 #  ОПРЕДЕЛЕНИЕ ТИПА ОБОРУДОВАНИЯ (ЛОКАЛЬНОЕ)

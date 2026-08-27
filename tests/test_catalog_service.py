@@ -56,3 +56,18 @@ def test_legacy_extra_imports_point_to_catalog_service():
     assert extra.load_ships is catalog_service.load_ships
     assert extra.load_companies is catalog_service.load_companies
     assert extra.find_employee_role is catalog_service.find_employee_role
+
+
+def test_ship_addition_is_atomic_and_rejects_duplicate(tmp_path):
+    repository = CatalogRepository(tmp_path)
+    assert repository.add_ship("  Новое   судно ")[0] is True
+    assert repository.load_ships() == {"новое судно": "Новое судно"}
+    assert repository.add_ship("Новое судно")[0] is False
+    assert not (tmp_path / "ships.json.tmp").exists()
+
+
+def test_company_update_validates_field(tmp_path):
+    repository = CatalogRepository(tmp_path)
+    assert repository.update_company("customer", " Новый заказчик ")[0] is True
+    assert repository.load_companies()["customer"] == "Новый заказчик"
+    assert repository.update_company("token", "secret")[0] is False

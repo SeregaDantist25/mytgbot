@@ -25,6 +25,16 @@ class CatalogRepository:
         path = self.data_dir / filename
         if not path.exists():
             return fallback
+
+    def _write_json(self, filename: str, data) -> None:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        target = self.data_dir / filename
+        temporary = target.with_name(f"{target.name}.tmp")
+        temporary.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        os.replace(temporary, target)
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -66,6 +76,29 @@ class CatalogRepository:
             result.update(data)
         return result
 
+    def add_ship(self, name: str) -> tuple[bool, str]:
+        clean_name = " ".join((name or "").strip().split())
+        if not clean_name:
+            return False, "Пустое название судна."
+        ships = self.load_ships()
+        key = clean_name.lower()
+        if key in ships:
+            return False, f"Судно «{clean_name}» уже есть в списке."
+        ships[key] = clean_name
+        self._write_json("ships.json", ships)
+        return True, f"✅ Судно «{clean_name}» добавлено."
+
+    def update_company(self, field: str, value: str) -> tuple[bool, str]:
+        if field not in DEFAULT_COMPANIES:
+            return False, "Неизвестное поле реквизитов."
+        clean_value = " ".join((value or "").strip().split())
+        if not clean_value:
+            return False, "Пустое значение."
+        companies = self.load_companies()
+        companies[field] = clean_value
+        self._write_json("companies.json", companies)
+        return True, f"✅ Поле «{field}» обновлено."
+
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
 repository = CatalogRepository(DATA_DIR)
@@ -93,3 +126,11 @@ def find_employee_role(name: str) -> str | None:
 
 def load_companies() -> dict:
     return repository.load_companies()
+
+
+def add_ship(name: str) -> tuple[bool, str]:
+    return repository.add_ship(name)
+
+
+def add_company(field: str, value: str) -> tuple[bool, str]:
+    return repository.update_company(field, value)
