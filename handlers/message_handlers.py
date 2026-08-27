@@ -102,6 +102,15 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
         )
         show_navigation_menu(message.chat.id)
 
+    @bot.message_handler(commands=['myid'])
+    def cmd_myid(message):
+        """Показать пользователю его собственный Telegram ID."""
+        bot.reply_to(
+            message,
+            f"🆔 Ваш Telegram ID: `{message.from_user.id}`",
+            parse_mode="Markdown",
+        )
+
     # ============================================================
     #  АВТОРИЗАЦИЯ И РОЛИ
     # ============================================================
@@ -110,6 +119,22 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
     def cmd_login(message):
         """Регистрация/вход пользователя."""
         user = us.get_user(message.chat.id)
+        if not user and message.chat.id in bot_context.ADMIN_IDS:
+            first_name = getattr(message.from_user, "first_name", None) or "Администратор"
+            last_name = getattr(message.from_user, "last_name", None)
+            name = " ".join(part for part in (first_name, last_name) if part)
+            user = us.create_user(
+                message.chat.id,
+                name,
+                us.ROLE_ENGINEER,
+                approved=1,
+            )
+            bot.reply_to(
+                message,
+                f"✅ Владелец зарегистрирован как инженер-технолог, {user.name}.",
+            )
+            show_navigation_menu(message.chat.id)
+            return
         if user and user.approved:
             bot.reply_to(
                 message,

@@ -38,7 +38,7 @@ class FakeBot:
 
 
 def _message(user_id, text):
-    user = SimpleNamespace(id=user_id, first_name="Тест")
+    user = SimpleNamespace(id=user_id, first_name="Тест", last_name="Инженеров")
     return SimpleNamespace(
         text=text,
         chat=SimpleNamespace(id=user_id),
@@ -93,3 +93,24 @@ def test_engineer_alias_can_approve_pending_registration(monkeypatch):
     assert approved.role == "builder"
     assert get_pending_user(applicant_id) is None
     assert any(chat_id == applicant_id for chat_id, _ in bot.sent_messages)
+
+
+def test_myid_returns_callers_own_telegram_id(monkeypatch):
+    bot = _registered_bot(monkeypatch)
+    bot.handlers["cmd_myid"](_message(9204, "/myid"))
+    assert "9204" in bot.replies[-1][1]
+
+
+def test_configured_admin_is_registered_as_engineer_on_first_login(monkeypatch):
+    admin_id = 9205
+    bot = _registered_bot(monkeypatch)
+    monkeypatch.setattr(bot_context, "ADMIN_IDS", [admin_id])
+
+    bot.handlers["cmd_login"](_message(admin_id, "/login"))
+
+    admin = get_user(admin_id)
+    assert admin is not None
+    assert admin.approved == 1
+    assert admin.role == "engineer"
+    assert admin.name == "Тест Инженеров"
+    assert "Владелец зарегистрирован" in bot.replies[-1][1]
