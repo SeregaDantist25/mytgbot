@@ -15,10 +15,45 @@ import tempfile
 from datetime import datetime
 
 import document_manager as dm
-from models import SessionLocal, Ship, RepairStatement, StatementItem
+import bot_context
+from models import SessionLocal, Ship, RepairStatement, StatementItem, User
 from file_storage import storage
 
 logger = logging.getLogger(__name__)
+
+
+def _approved_role(user_id):
+    """Вернуть роль только одобренного пользователя или администратора."""
+    if user_id in bot_context.ADMIN_IDS:
+        return dm.ROLE_ENGINEER
+    session = SessionLocal()
+    try:
+        user = session.query(User).filter_by(telegram_id=user_id).first()
+        return user.role if user and user.approved else None
+    finally:
+        session.close()
+
+
+def _can_view_repair_list(user_id):
+    return _approved_role(user_id) is not None
+
+
+def _can_upload_repair_list(user_id):
+    role = _approved_role(user_id)
+    return bool(role and dm.can_upload_repair_list(role))
+
+
+def _can_edit_repair_list(user_id):
+    role = _approved_role(user_id)
+    return bool(role and dm.can_edit_repair_list(role))
+
+
+def _deny_callback(bot, call):
+    bot.answer_callback_query(
+        call.id,
+        "🔒 Авторизуйтесь через /login",
+        show_alert=True,
+    )
 
 # ============================================================
 #  STATES ДЛЯ МНОГОШАГОВЫХ СЦЕНАРИЕВ
@@ -41,9 +76,7 @@ def register_upload_handlers(bot):
     @bot.message_handler(commands=['upload_repair_list'])
     def cmd_upload_repair_list(message):
         """Команда для загрузки ремонтной ведомости (Excel)."""
-        user_role = dm.get_user_role(message.chat.id)
-        
-        if not dm.can_upload_repair_list(user_role):
+        if not _can_upload_repair_list(message.from_user.id):
             bot.reply_to(message, "🚫 У вас нет прав на загрузку ремонтных ведомостей.")
             return
         
@@ -75,6 +108,9 @@ def register_upload_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("upload_ship_"))
     def handle_upload_ship_select(call):
         """Обработчик выбора судна для загрузки."""
+        if not _can_upload_repair_list(call.from_user.id):
+            _deny_callback(bot, call)
+            return
         try:
             ship_id = int(call.data.split("_")[2])
         except (ValueError, IndexError):
@@ -95,10 +131,9 @@ def register_upload_handlers(bot):
     @bot.message_handler(state=DocumentStates.waiting_ship_select, content_types=['document'])
     def handle_repair_list_upload(message):
         """Обработчик загрузки Excel-файла ремонтной ведомости."""
-        user_role = dm.get_user_role(message.chat.id)
-        
-        if not dm.can_upload_repair_list(user_role):
+        if not _can_upload_repair_list(message.from_user.id):
             bot.reply_to(message, "🚫 У вас нет прав на загрузку ремонтных ведомостей.")
+            bot.delete_state(message.from_user.id, message.chat.id)
             return
         
         # Получить ship_id из состояния
@@ -180,6 +215,10 @@ def _show_ships_menu(bot, chat_id):
     Если судов нет в БД, попытается синхронизировать из ships.json.
     Если всё равно нет — предложит добавить судно.
     """
+    if not _can_view_repair_list(chat_id):
+        bot.send_message(chat_id, "🔒 Для просмотра войдите через /login.")
+        return
+
     session = SessionLocal()
     try:
         ships = session.query(Ship).all()
@@ -224,6 +263,9 @@ def _show_ships_menu(bot, chat_id):
 
 def _show_sections(bot, call, ship_id, page=0):
     """Показать список разделов ремонтной ведомости судна (с пагинацией)."""
+    if not _can_view_repair_list(call.from_user.id):
+        _deny_callback(bot, call)
+        return
     sections = dm.get_sections_for_ship(ship_id)
 
     if not sections:
@@ -276,9 +318,7 @@ def register_navigation_handlers(bot):
     @bot.message_handler(commands=['repair_list'])
     def cmd_repair_list(message):
         """Показать ремонтную ведомость судна."""
-        user_role = dm.get_user_role(message.chat.id)
-
-        if not user_role:
+        if not _can_view_repair_list(message.from_user.id):
             bot.reply_to(message, "🔒 Сначала авторизуйтесь.")
             return
 
@@ -287,6 +327,9 @@ def register_navigation_handlers(bot):
     @bot.message_handler(commands=['scan_acts'])
     def cmd_scan_acts(message):
         """Импортировать готовые акты дефектации из папки acts/."""
+        if not _can_edit_repair_list(message.from_user.id):
+            bot.reply_to(message, "🚫 У вас нет прав на импорт актов.")
+            return
         try:
             import act_importer
             messages = act_importer.import_acts()
@@ -303,6 +346,9 @@ def register_navigation_handlers(bot):
     @bot.message_handler(func=lambda message: message.text == "📄 Документы")
     def handle_nav_documents(message):
         """Кнопка «Документы» → подсказка."""
+        if not _can_view_repair_list(message.from_user.id):
+            bot.send_message(message.chat.id, "🔒 Для просмотра войдите через /login.")
+            return
         bot.send_message(
             message.chat.id,
             "📄 Чтобы посмотреть документы, выберите судно и пункт в ремонтной ведомости "
@@ -312,6 +358,9 @@ def register_navigation_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("ship_"))
     def handle_ship_select(call):
         """Обработчик выбора судна."""
+        if not _can_view_repair_list(call.from_user.id):
+            _deny_callback(bot, call)
+            return
         try:
             ship_id = int(call.data.split("_")[1])
         except (ValueError, IndexError):
@@ -341,6 +390,9 @@ def register_navigation_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("sections_"))
     def handle_sections_page(call):
         """Пагинация списка разделов."""
+        if not _can_view_repair_list(call.from_user.id):
+            _deny_callback(bot, call)
+            return
         try:
             parts = call.data.split("_")
             ship_id = int(parts[1])
@@ -399,6 +451,9 @@ def register_navigation_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("items_"))
     def handle_items_page(call):
         """Пагинация списка пунктов раздела."""
+        if not _can_view_repair_list(call.from_user.id):
+            _deny_callback(bot, call)
+            return
         try:
             parts = call.data.split("_")
             ship_id = int(parts[1])
@@ -424,6 +479,9 @@ def register_navigation_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("section_"))
     def handle_section_select(call):
         """Обработчик выбора раздела (по хешу названия)."""
+        if not _can_view_repair_list(call.from_user.id):
+            _deny_callback(bot, call)
+            return
         try:
             parts = call.data.split("_")
             ship_id = int(parts[1])
@@ -448,6 +506,9 @@ def register_navigation_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("item_"))
     def handle_item_select(call):
         """Обработчик выбора пункта."""
+        if not _can_view_repair_list(call.from_user.id):
+            _deny_callback(bot, call)
+            return
         try:
             item_id = int(call.data.split("_")[1])
         except (ValueError, IndexError):
@@ -502,6 +563,9 @@ def register_navigation_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("download_act_"))
     def handle_download_act(call):
         """Скачивание загруженного акта дефектации."""
+        if not _can_view_repair_list(call.from_user.id):
+            _deny_callback(bot, call)
+            return
         try:
             doc_id = int(call.data.split("_")[2])
         except (ValueError, IndexError):
@@ -523,6 +587,9 @@ def register_navigation_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("back_to_items_"))
     def handle_back_to_items(call):
         """Возврат к списку пунктов раздела из деталей пункта."""
+        if not _can_view_repair_list(call.from_user.id):
+            _deny_callback(bot, call)
+            return
         try:
             parts = call.data.split("_")
             ship_id = int(parts[3])
@@ -546,6 +613,9 @@ def register_navigation_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data == "add_ship")
     def handle_add_ship(call):
         """Обработчик кнопки 'Добавить судно'."""
+        if not _can_edit_repair_list(call.from_user.id):
+            _deny_callback(bot, call)
+            return
         bot.answer_callback_query(call.id)
         bot.send_message(
             call.message.chat.id,
@@ -554,6 +624,9 @@ def register_navigation_handlers(bot):
         
         def process_add_ship_inner(message):
             """Обработчик ввода названия судна."""
+            if not _can_edit_repair_list(message.from_user.id):
+                bot.send_message(message.chat.id, "🚫 У вас нет прав на добавление судна.")
+                return
             ship_name = message.text.strip()
             if not ship_name:
                 bot.send_message(message.chat.id, "❌ Название не может быть пустым.")
