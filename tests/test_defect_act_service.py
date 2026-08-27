@@ -56,6 +56,14 @@ def test_pipeline_profile_uses_flat_rows():
     assert "остаточную толщину" in rows[0]["work"]
 
 
+def test_quantity_is_taken_from_repair_item():
+    rows = build_defect_rows(
+        "Трубопровод", ["Коррозия"], "Замена", "pipeline", quantity="2 шт."
+    )
+    assert rows[0]["qty"] == "2"
+    assert rows[0]["unit"] == "шт."
+
+
 def test_gear_profile_uses_hierarchical_rows():
     profile = detect_defect_profile("Редуктор брашпиля")
     rows = build_defect_rows("Редуктор брашпиля", ["Износ зубьев"], "Разобрать", profile)

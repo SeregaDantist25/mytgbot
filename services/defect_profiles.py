@@ -76,9 +76,13 @@ def build_defect_rows(
     defects: Iterable[str],
     work_volume: str,
     profile: str | None = None,
+    quantity: str | None = None,
 ) -> list[dict[str, str]]:
     """Преобразует данные старого диалога в строки универсального акта."""
     profile = profile or detect_defect_profile(equipment)
+    quantity_match = re.search(r"([\d.,]+)\s*([^\d\s]+)?", quantity or "")
+    item_quantity = quantity_match.group(1) if quantity_match else "1"
+    item_unit = quantity_match.group(2) if quantity_match and quantity_match.group(2) else "шт."
     clean_defects = [str(value).strip() for value in defects if str(value).strip()]
     if not clean_defects:
         clean_defects = ["Техническое состояние требует уточнения при разборке"]
@@ -89,8 +93,8 @@ def build_defect_rows(
                 "num": str(index),
                 "defect": defect,
                 "work": _repair_for_defect(defect, profile),
-                "unit": "шт.",
-                "qty": "1",
+                "unit": item_unit,
+                "qty": item_quantity,
                 "note": "",
             }
             for index, defect in enumerate(clean_defects, 1)
@@ -101,7 +105,7 @@ def build_defect_rows(
         "defect": equipment,
         "work": work_volume,
         "unit": "компл.",
-        "qty": "1",
+        "qty": item_quantity,
         "note": "",
     }]
     rows.extend(
@@ -116,4 +120,3 @@ def build_defect_rows(
         for index, defect in enumerate(clean_defects, 1)
     )
     return rows
-
