@@ -58,3 +58,8 @@ def test_message_handlers_use_dedicated_chat_state_service():
     extra_import = source.split("from services.extra import (", 1)[1].split(")", 1)[0]
     assert "get_chat_state" not in extra_import
     assert "set_chat_state" not in extra_import
+
+
+def test_document_builder_uses_dedicated_counter_service():
+    source = (ROOT / "services" / "document_builder.py").read_text(encoding="utf-8")
+    assert "from services.document_counter_service import get_next_number" in source

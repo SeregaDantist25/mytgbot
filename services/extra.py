@@ -19,7 +19,6 @@ import os
 import re
 import json
 import time
-import sqlite3
 import subprocess
 import logging
 from datetime import datetime
@@ -40,6 +39,11 @@ from services.document_service import (
     delete_document,
 )
 from services.chat_state_service import get_chat_state, set_chat_state
+from services.document_counter_service import (
+    get_counter,
+    get_next_number,
+    update_counter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +51,9 @@ logger = logging.getLogger(__name__)
 TEMPLATES_DIR = os.getenv("TEMPLATES_DIR", "templates")
 DATA_DIR = os.getenv("DATA_DIR", "data")
 CHECKLISTS_FILE = os.path.join(DATA_DIR, "checklists.json")
-COUNTERS_FILE = os.path.join(DATA_DIR, "counters.json")
 SHIPS_FILE = os.path.join(DATA_DIR, "ships.json")
 COMPANIES_FILE = os.path.join(DATA_DIR, "companies.json")
 EMPLOYEES_FILE = os.path.join(DATA_DIR, "employees.json")
-COUNTERS_DB = os.path.join(DATA_DIR, "counters.db")
 
 # Полный путь к git (в PATH его может не быть)
 _GIT_EXE = r"C:\Program Files\Git\bin\git.exe"
@@ -255,80 +257,6 @@ def replace_placeholders(doc, placeholders: dict) -> DocxDocument:
                     _replace_in_paragraph(paragraph)
 
     return doc
-
-
-# ============================================================
-#  СЧЁТЧИКИ ДОКУМЕНТОВ
-# ============================================================
-
-def _init_counters_db() -> None:
-    """Создаёт таблицу counters и мигрирует значения из counters.json один раз."""
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
-    conn = sqlite3.connect(COUNTERS_DB)
-    cursor = conn.cursor()
-    cursor.execute(
-        "CREATE TABLE IF NOT EXISTS counters (doc_type TEXT PRIMARY KEY, value INTEGER)"
-    )
-    if os.path.exists(COUNTERS_FILE):
-        try:
-            with open(COUNTERS_FILE, 'r', encoding='utf-8') as f:
-                old = json.load(f)
-            for doc_type, value in old.items():
-                cursor.execute(
-                    "INSERT OR IGNORE INTO counters (doc_type, value) VALUES (?, ?)",
-                    (doc_type, value),
-                )
-            conn.commit()
-            os.rename(COUNTERS_FILE, COUNTERS_FILE + ".migrated")
-        except Exception as e:
-            logger.warning(f"Ошибка миграции счётчиков: {e}")
-    conn.commit()
-    conn.close()
-
-
-_init_counters_db()
-
-
-def get_next_number(doc_type: str) -> int:
-    """Атомарно инкрементирует счётчик и возвращает новое значение."""
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
-    conn = sqlite3.connect(COUNTERS_DB)
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE counters SET value = value + 1 WHERE doc_type = ? RETURNING value",
-        (doc_type,),
-    )
-    row = cursor.fetchone()
-    if row is None:
-        cursor.execute("INSERT INTO counters (doc_type, value) VALUES (?, 1)", (doc_type,))
-        conn.commit()
-        conn.close()
-        return 1
-    conn.commit()
-    conn.close()
-    return row[0]
-
-
-def get_counter(doc_type: str) -> int:
-    """Обратная совместимость: возвращает следующий номер без инкремента."""
-    return get_next_number(doc_type)
-
-
-def update_counter(doc_type: str, new_number: int) -> None:
-    """Обратная совместимость: устанавливает счётчик в заданное значение."""
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
-    conn = sqlite3.connect(COUNTERS_DB)
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO counters (doc_type, value) VALUES (?, ?) "
-        "ON CONFLICT(doc_type) DO UPDATE SET value = excluded.value",
-        (doc_type, new_number),
-    )
-    conn.commit()
-    conn.close()
 
 
 # ============================================================

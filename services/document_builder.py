@@ -3,8 +3,8 @@
 Создание документов Word (акты дефектации и акты выполненных работ).
 
 Содержит функции построения таблиц дефектации и генерации .docx-файлов
-на основе шаблонов. Импортирует вспомогательные функции из services.extra
-(счётчики, детекция, загрузка компаний, замена плейсхолдеров).
+на основе шаблонов. Импортирует детекцию, справочники и замену плейсхолдеров
+из services.extra, а нумерацию — из отдельного сервиса счётчиков.
 """
 
 from io import BytesIO
@@ -17,12 +17,12 @@ from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from services.extra import (
     load_template,
     replace_placeholders,
-    get_next_number,
     load_companies,
     detect_equipment_type,
     build_defect_table_pump,
     build_defect_table_engine,
 )
+from services.document_counter_service import get_next_number
 
 
 def create_defect_document(
