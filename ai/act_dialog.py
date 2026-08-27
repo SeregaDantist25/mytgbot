@@ -47,7 +47,7 @@ from services.defect_profiles import (
 logger = logging.getLogger(__name__)
 
 # Роли, которым разрешено создавать акты дефектации через AI-диалог.
-ALLOWED_ROLES = ("engineer", "builder")
+ALLOWED_ROLES = ("engineer", "engineer_technologist", "builder")
 
 # Максимальное число циклов правок акта, прежде чем диалог придётся завершить.
 MAX_EDITS = 5
