@@ -20,3 +20,23 @@ def test_bot_registers_handlers_only_through_registry():
     assert "register_message_handlers(bot)" not in source
     assert "register_callback_handlers(bot)" not in source
     assert "register_document_handlers(bot)" not in source
+
+
+def test_root_handler_modules_are_compatibility_shims():
+    expected_targets = {
+        "document_handlers.py": "handlers.document_handlers",
+        "category_handlers.py": "handlers.category_handlers",
+        "bot_handlers_new.py": "handlers.repair_handlers",
+    }
+    for file_name, target in expected_targets.items():
+        source = (ROOT / file_name).read_text(encoding="utf-8")
+        assert target in source
+        assert len(source.splitlines()) < 30
+
+
+def test_registry_uses_package_handlers_not_root_shims():
+    source = (ROOT / "handlers" / "registry.py").read_text(encoding="utf-8")
+    assert "from handlers.category_handlers import" in source
+    assert "from handlers import repair_handlers" in source
+    assert "from category_handlers import" not in source
+    assert "import bot_handlers_new" not in source

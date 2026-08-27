@@ -15,6 +15,8 @@ __all__ = [
     'message_handlers',
     'callback_handlers',
     'document_handlers',
+    'category_handlers',
+    'repair_handlers',
     'error_handlers',
     'registry',
 ]

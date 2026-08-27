@@ -512,13 +512,13 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
         # ВАЖНО: telebot выполняет только первый совпавший message_handler из
         # общего списка (см. TeleBot._run_middlewares_and_handler -> break).
         # handle_message регистрируется раньше специфичных хендлеров кнопок
-        # (bot_handlers_new.register_navigation_handlers), поэтому те хендлеры
+        # (repair_handlers.register_navigation_handlers), поэтому те хендлеры
         # для кнопок никогда не вызываются сами — их нужно вызвать явно здесь.
         if user_text in NAVIGATION_BUTTONS:
             if bot_context.DOCUMENT_MANAGER_AVAILABLE:
-                import bot_handlers_new
+                from handlers import repair_handlers
                 if user_text in ("📋 Ремонтная ведомость", "🚢 Суда"):
-                    bot_handlers_new._show_ships_menu(bot, message.chat.id)
+                    repair_handlers._show_ships_menu(bot, message.chat.id)
                 elif user_text == "📄 Документы":
                     bot.send_message(
                         message.chat.id,

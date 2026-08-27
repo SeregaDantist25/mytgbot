@@ -7,8 +7,8 @@ import logging
 
 from handlers.message_handlers import register_message_handlers
 from handlers.document_handlers import register_document_handlers
+from handlers.category_handlers import register_category_handlers
 from handlers.error_handlers import setup_error_handlers
-from category_handlers import register_category_handlers
 
 
 logger = logging.getLogger(__name__)
@@ -33,10 +33,10 @@ def register_all_handlers(bot, document_manager_available=True):
     registered.append("document_categories")
 
     if document_manager_available:
-        import bot_handlers_new
+        from handlers import repair_handlers
 
-        bot_handlers_new.register_upload_handlers(bot)
-        bot_handlers_new.register_navigation_handlers(bot)
+        repair_handlers.register_upload_handlers(bot)
+        repair_handlers.register_navigation_handlers(bot)
         registered.extend(("repair_upload", "repair_navigation"))
 
     try:

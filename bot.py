@@ -88,7 +88,7 @@ bot_context.pump_db = pump_db
 # --- Новые модули для документооборота ---
 try:
     import document_manager
-    import bot_handlers_new
+    from handlers import repair_handlers
     bot_context.DOCUMENT_MANAGER_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Модули документооборота не загружены: {e}")
