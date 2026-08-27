@@ -205,6 +205,23 @@ def get_pending_users() -> list:
         session.close()
 
 
+def get_pending_user(user_id: int) -> Optional[dict]:
+    """Вернуть одну ожидающую заявку по Telegram ID."""
+    session = SessionLocal()
+    try:
+        pending = session.query(PendingUser).filter_by(user_id=user_id).first()
+        if not pending:
+            return None
+        return {
+            "user_id": pending.user_id,
+            "name": pending.name,
+            "role_requested": pending.role_requested,
+            "phone": pending.phone,
+        }
+    finally:
+        session.close()
+
+
 def remove_pending_user(user_id: int) -> None:
     session = SessionLocal()
     try:

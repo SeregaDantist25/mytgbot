@@ -101,11 +101,13 @@ except ImportError as e:
 from handlers.message_handlers import register_message_handlers
 from handlers.callback_handlers import register_callback_handlers
 from handlers.document_handlers import register_document_handlers
+from category_handlers import register_category_handlers
 from handlers.error_handlers import setup_error_handlers
 
 register_message_handlers(bot)
 register_callback_handlers(bot)
 register_document_handlers(bot)
+register_category_handlers(bot)
 setup_error_handlers(bot)
 
 # Регистрируем обработчики загрузки ремонтной ведомости и навигации

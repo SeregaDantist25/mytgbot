@@ -121,6 +121,9 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
         if user and not user.approved:
             bot.reply_to(message, "⏳ Ваша заявка ещё на рассмотрении. Ожидайте одобрения.")
             return
+        if us.get_pending_user(message.chat.id):
+            bot.reply_to(message, "⏳ Ваша заявка уже отправлена и ожидает одобрения.")
+            return
         set_chat_state(message.chat.id, "reg_step", "name")
         bot.reply_to(message, "📝 Регистрация. Введите ваше ФИО:")
 
@@ -548,7 +551,7 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
                 )
                 approvers = [
                     u.telegram_id for u in us.get_users()
-                    if u.approved and u.role in (us.ROLE_ENGINEER, us.ROLE_DIRECTOR)
+                    if u.approved and (us.is_engineer(u) or us.is_director(u))
                 ]
                 for uid in approvers:
                     try:

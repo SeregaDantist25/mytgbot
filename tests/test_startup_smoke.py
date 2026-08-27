@@ -18,7 +18,11 @@ def test_application_imports_and_registers_handlers(tmp_path):
     code = (
         "import bot; "
         "assert len(bot.bot.message_handlers) >= 20; "
-        "assert len(bot.bot.callback_query_handlers) >= 15; "
+        "assert len(bot.bot.callback_query_handlers) >= 21; "
+        "names = {h['function'].__name__ for h in bot.bot.callback_query_handlers}; "
+        "assert {'handle_categories_button', 'handle_documents_button', "
+        "'handle_document_details', 'handle_document_approve', "
+        "'handle_document_archive', 'handle_document_download'} <= names; "
         "assert bot.bot_context.DOCUMENT_MANAGER_AVAILABLE"
     )
     result = subprocess.run(

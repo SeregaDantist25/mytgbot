@@ -10,6 +10,8 @@ from services.user_service import (
     get_users,
     get_stats,
     update_user_role,
+    add_pending_user,
+    get_pending_user,
 )
 
 
@@ -61,3 +63,13 @@ class TestUserService:
 
     def test_update_missing_user(self):
         assert update_user_role(999999, "director") is False
+
+    def test_get_pending_user(self):
+        add_pending_user(1010, "Жуков", "builder", "+7 900 000-00-00")
+        assert get_pending_user(1010) == {
+            "user_id": 1010,
+            "name": "Жуков",
+            "role_requested": "builder",
+            "phone": "+7 900 000-00-00",
+        }
+        assert get_pending_user(999999) is None
