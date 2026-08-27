@@ -25,6 +25,10 @@ class CatalogRepository:
         path = self.data_dir / filename
         if not path.exists():
             return fallback
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return fallback
 
     def _write_json(self, filename: str, data) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -35,10 +39,6 @@ class CatalogRepository:
             encoding="utf-8",
         )
         os.replace(temporary, target)
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return fallback
 
     def load_checklists(self) -> dict:
         data = self._read_json("checklists.json", {})
