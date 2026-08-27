@@ -40,3 +40,13 @@ def test_registry_uses_package_handlers_not_root_shims():
     assert "from handlers import repair_handlers" in source
     assert "from category_handlers import" not in source
     assert "import bot_handlers_new" not in source
+
+
+def test_obsolete_patch_and_empty_callback_modules_are_removed():
+    obsolete = [
+        "handle_message_patch.py",
+        "patch_bot.py",
+        "handlers/callback_handlers.py",
+        "Новый текстовый документ.txt",
+    ]
+    assert all(not (ROOT / relative_path).exists() for relative_path in obsolete)
