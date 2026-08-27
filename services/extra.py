@@ -23,8 +23,6 @@ import subprocess
 import logging
 from datetime import datetime
 
-from docx import Document as DocxDocument
-
 from models import (
     SessionLocal,
     User,
@@ -54,11 +52,11 @@ from services.catalog_service import (
     load_employees,
     load_ships,
 )
+from services.template_service import load_template, replace_placeholders
 
 logger = logging.getLogger(__name__)
 
 # --- Пути к файлам ---
-TEMPLATES_DIR = os.getenv("TEMPLATES_DIR", "templates")
 DATA_DIR = os.getenv("DATA_DIR", "data")
 # Полный путь к git (в PATH его может не быть)
 _GIT_EXE = r"C:\Program Files\Git\bin\git.exe"
@@ -140,57 +138,6 @@ class PumpDatabase:
             if key in defect_lower:
                 return method
         return None
-
-
-# ============================================================
-#  РАБОТА С ШАБЛОНАМИ
-# ============================================================
-
-def load_template(filename: str) -> DocxDocument:
-    """Загружает шаблон Word из TEMPLATES_DIR."""
-    template_path = os.path.join(TEMPLATES_DIR, filename)
-    if not os.path.exists(template_path):
-        raise FileNotFoundError(f"Шаблон {filename} не найден в {TEMPLATES_DIR}")
-    return DocxDocument(template_path)
-
-
-def _merge_runs_with_tag(paragraph, tag: str) -> None:
-    """Склеивает runs параграфа в один, если тег разбит на несколько runs."""
-    full_text = paragraph.text
-    if tag not in full_text:
-        return
-    for run in paragraph.runs:
-        if tag in run.text:
-            return  # тег уже в одном run — нормализация не нужна
-    if not paragraph.runs:
-        return
-    first_run = paragraph.runs[0]
-    first_run.text = full_text
-    for run in paragraph.runs[1:]:
-        run.text = ""
-
-
-def replace_placeholders(doc, placeholders: dict) -> DocxDocument:
-    """Заменяет плейсхолдеры {{key}} в параграфах и таблицах документа."""
-    def _replace_in_paragraph(paragraph):
-        for key in placeholders:
-            tag = f"{{{{{key}}}}}"
-            if tag in paragraph.text:
-                _merge_runs_with_tag(paragraph, tag)
-                for run in paragraph.runs:
-                    if tag in run.text:
-                        run.text = run.text.replace(tag, str(placeholders[key]))
-
-    for paragraph in doc.paragraphs:
-        _replace_in_paragraph(paragraph)
-
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for paragraph in cell.paragraphs:
-                    _replace_in_paragraph(paragraph)
-
-    return doc
 
 
 # ============================================================

@@ -72,3 +72,11 @@ def test_active_modules_use_dedicated_catalog_service():
         (ROOT / "services" / "document_builder.py").read_text(encoding="utf-8"),
     ]
     assert all("from services.catalog_service import" in source for source in sources)
+
+
+def test_document_builder_uses_dedicated_template_service():
+    source = (ROOT / "services" / "document_builder.py").read_text(encoding="utf-8")
+    assert "from services.template_service import" in source
+    extra_import = source.split("from services.extra import (", 1)[1].split(")", 1)[0]
+    assert "load_template" not in extra_import
+    assert "replace_placeholders" not in extra_import

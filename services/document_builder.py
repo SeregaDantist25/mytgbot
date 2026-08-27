@@ -15,14 +15,13 @@ from docx.shared import Cm
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 
 from services.extra import (
-    load_template,
-    replace_placeholders,
     detect_equipment_type,
     build_defect_table_pump,
     build_defect_table_engine,
 )
 from services.catalog_service import load_companies
 from services.document_counter_service import get_next_number
+from services.template_service import load_template, replace_placeholders
 
 
 def create_defect_document(
