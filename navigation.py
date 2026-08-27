@@ -6,6 +6,7 @@
 
 from telebot import types
 from models import SessionLocal, Ship, StatementItem, RepairStatement, Document
+from document_manager import section_hash as stable_section_hash
 
 
 # Категории документов
@@ -61,8 +62,7 @@ def build_sections_keyboard(ship_id, page=0, items_per_page=10):
     for section in page_sections:
         # Callback: sections_<ship_id>_<section_hash>
         # Используем хеш раздела, чтобы не превышать 64 байта
-        section_hash = str(hash(section) & 0x7fffffff)  # Положительное число
-        callback = f"section_{ship_id}_{section_hash}"
+        callback = f"section_{ship_id}_{stable_section_hash(section)}"
         keyboard.add(types.InlineKeyboardButton(section, callback_data=callback))
     
     # Кнопки пагинации
@@ -95,11 +95,9 @@ def build_items_keyboard(ship_id, section, page=0, items_per_page=10):
     
     # Кнопки пагинации
     if page > 0:
-        section_hash = str(hash(section) & 0x7fffffff)
-        keyboard.add(types.InlineKeyboardButton("◀ Назад", callback_data=f"items_{ship_id}_{section_hash}_{page-1}"))
+        keyboard.add(types.InlineKeyboardButton("◀ Назад", callback_data=f"items_{ship_id}_{stable_section_hash(section)}_{page-1}"))
     if end < len(items):
-        section_hash = str(hash(section) & 0x7fffffff)
-        keyboard.add(types.InlineKeyboardButton("Далее ▶", callback_data=f"items_{ship_id}_{section_hash}_{page+1}"))
+        keyboard.add(types.InlineKeyboardButton("Далее ▶", callback_data=f"items_{ship_id}_{stable_section_hash(section)}_{page+1}"))
     
     return keyboard
 

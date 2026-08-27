@@ -16,6 +16,7 @@ from models import SessionLocal, User, Ship, RepairStatement, StatementItem, Doc
 
 # Роли (из db.py)
 ROLE_ENGINEER = "engineer"
+ROLE_ENGINEER_TECHNOLOGIST = "engineer_technologist"
 ROLE_DIRECTOR = "director"
 ROLE_BUILDER = "builder"
 ROLE_CUSTOMER = "customer"
@@ -25,13 +26,22 @@ def section_hash(section):
     return str(int(hashlib.md5(section.encode("utf-8")).hexdigest()[:8], 16))
 
 # Роли, которые могут загружать ремонтные ведомости
-ROLES_CAN_UPLOAD_REPAIR_LIST = {ROLE_ENGINEER, ROLE_DIRECTOR, ROLE_BUILDER}
+ROLES_CAN_UPLOAD_REPAIR_LIST = {
+    ROLE_ENGINEER,
+    ROLE_ENGINEER_TECHNOLOGIST,
+    ROLE_DIRECTOR,
+    ROLE_BUILDER,
+}
 
 # Роли, которые могут редактировать/удалять ремонтные ведомости
-ROLES_CAN_EDIT_REPAIR_LIST = {ROLE_ENGINEER, ROLE_BUILDER}
+ROLES_CAN_EDIT_REPAIR_LIST = {
+    ROLE_ENGINEER,
+    ROLE_ENGINEER_TECHNOLOGIST,
+    ROLE_BUILDER,
+}
 
 # Роли, которые могут удалять approved документы
-ROLES_CAN_DELETE_APPROVED = {ROLE_ENGINEER}
+ROLES_CAN_DELETE_APPROVED = {ROLE_ENGINEER, ROLE_ENGINEER_TECHNOLOGIST}
 
 
 def get_user_role(telegram_id):
@@ -151,6 +161,7 @@ def save_repair_items_to_db(ship_id, items):
                     status="active"
                 )
                 session.add(item)
+                existing_keys.add(key)
                 result["created"] += 1
             except Exception as e:
                 result["errors"].append(f"Ошибка при добавлении пункта {item_data.get('item_number')}: {str(e)}")
@@ -244,12 +255,15 @@ def get_sections_for_ship(ship_id):
     """
     session = SessionLocal()
     try:
-        statement = session.query(RepairStatement).filter_by(ship_id=ship_id).first()
-        if not statement:
+        statement_ids = [
+            row[0]
+            for row in session.query(RepairStatement.id).filter_by(ship_id=ship_id).all()
+        ]
+        if not statement_ids:
             return []
 
         sections = session.query(StatementItem.section).filter(
-            StatementItem.statement_id == statement.id,
+            StatementItem.statement_id.in_(statement_ids),
             StatementItem.status == "active",
             StatementItem.section.isnot(None),
         ).distinct().order_by(StatementItem.section).all()
@@ -257,9 +271,8 @@ def get_sections_for_ship(ship_id):
 
         # Отдельный раздел для дополнительных работ
         has_extra = session.query(StatementItem).filter_by(
-            statement_id=statement.id,
             status="extra",
-        ).first()
+        ).filter(StatementItem.statement_id.in_(statement_ids)).first()
         if has_extra:
             result.append("Дополнительные работы")
 
@@ -276,22 +289,25 @@ def get_items_for_section(ship_id, section):
     """
     session = SessionLocal()
     try:
-        statement = session.query(RepairStatement).filter_by(ship_id=ship_id).first()
-        if not statement:
+        statement_ids = [
+            row[0]
+            for row in session.query(RepairStatement.id).filter_by(ship_id=ship_id).all()
+        ]
+        if not statement_ids:
             return []
 
         if section == "Дополнительные работы":
             # Пункты доп. работ имеют status=extra и могут иметь любой section
-            items = session.query(StatementItem).filter_by(
-                statement_id=statement.id,
-                status="extra",
-            ).all()
+            items = session.query(StatementItem).filter(
+                StatementItem.statement_id.in_(statement_ids),
+                StatementItem.status == "extra",
+            ).order_by(StatementItem.item_number).all()
         else:
-            items = session.query(StatementItem).filter_by(
-                statement_id=statement.id,
-                section=section,
-                status="active",
-            ).all()
+            items = session.query(StatementItem).filter(
+                StatementItem.statement_id.in_(statement_ids),
+                StatementItem.section == section,
+                StatementItem.status == "active",
+            ).order_by(StatementItem.item_number).all()
 
         return [
             {
@@ -337,6 +353,10 @@ def get_item_details(item_id):
             "description": item.description,
             "quantity": item.quantity,
             "section": item.section,
+            "status": item.status,
+            "navigation_section": (
+                "Дополнительные работы" if item.status == "extra" else item.section
+            ),
             "documents": [
                 {
                     "id": doc.id,

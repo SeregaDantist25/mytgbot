@@ -486,7 +486,8 @@ def register_navigation_handlers(bot):
             markup.add(types.InlineKeyboardButton("📥 Скачать акт дефектации", callback_data=f"download_act_{defect_act['id']}"))
         # Назад к списку пунктов раздела (с контекстом судна и раздела)
         ship_id = dm.get_ship_id_for_item(item_id)
-        section_hash = dm.section_hash(item['section']) if item['section'] else ""
+        navigation_section = item.get('navigation_section') or item['section']
+        section_hash = dm.section_hash(navigation_section) if navigation_section else ""
         back_data = f"back_to_items_{ship_id}_{section_hash}"
         markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data=back_data))
         

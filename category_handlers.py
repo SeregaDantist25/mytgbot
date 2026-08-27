@@ -7,6 +7,18 @@
 import navigation
 
 
+def _parse_documents_callback(callback_data):
+    """Разобрать ``docs_<item_id>_<category>_<page>``.
+
+    Категория может содержать подчёркивания (например, ``defect_act``),
+    поэтому обычный split по всем подчёркиваниям использовать нельзя.
+    """
+    payload = callback_data.removeprefix("docs_")
+    item_id_raw, category_and_page = payload.split("_", 1)
+    category, page_raw = category_and_page.rsplit("_", 1)
+    return int(item_id_raw), category, int(page_raw)
+
+
 def register_category_handlers(bot):
     """Регистрирует обработчики категорий в боте."""
     
@@ -49,10 +61,7 @@ def register_category_handlers(bot):
     def handle_documents_button(call):
         """Обработчик кнопки 'Документы' (показать документы категории)."""
         try:
-            parts = call.data.split("_")
-            item_id = int(parts[1])
-            category = parts[2]
-            page = int(parts[3]) if len(parts) > 3 else 0
+            item_id, category, page = _parse_documents_callback(call.data)
             
             # Получаем детали пункта
             item = navigation.get_item_details(item_id)

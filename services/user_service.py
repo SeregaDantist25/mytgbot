@@ -128,12 +128,14 @@ def update_user_role(user_id: int, new_role: str) -> bool:
 # ============================================================
 
 ROLE_ENGINEER = "engineer"
+ROLE_ENGINEER_TECHNOLOGIST = "engineer_technologist"
 ROLE_DIRECTOR = "director"
 ROLE_BUILDER = "builder"
 ROLE_CUSTOMER = "customer"
 
 ROLE_LABELS = {
     ROLE_ENGINEER: "Инженер-технолог",
+    ROLE_ENGINEER_TECHNOLOGIST: "Инженер-технолог",
     ROLE_DIRECTOR: "Директор",
     ROLE_BUILDER: "Строитель",
     ROLE_CUSTOMER: "Заказчик",
@@ -141,7 +143,7 @@ ROLE_LABELS = {
 
 
 def is_engineer(user) -> bool:
-    return bool(user) and user.role == ROLE_ENGINEER
+    return bool(user) and user.role in (ROLE_ENGINEER, ROLE_ENGINEER_TECHNOLOGIST)
 
 
 def is_director(user) -> bool:
