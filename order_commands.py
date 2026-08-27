@@ -19,7 +19,7 @@ from telebot import types
 
 from utils.decorators import require_role
 from services import order_service
-from services.extra import get_user_role
+from services.user_service import get_user_role
 
 
 # Роли, которым разрешено работать с заявками (заказчик исключён намеренно).

@@ -9,13 +9,17 @@ class AIRouter:
         self.folder_id = os.environ.get('YANDEX_FOLDER_ID')
         self.stats = {"calls": 0, "errors": 0}
         print(f"🔧 AIRouter инициализирован. API Key: {'есть' if self.api_key else 'НЕТ'}")
+
+    def is_configured(self) -> bool:
+        """Готов ли внешний YandexGPT к реальным запросам."""
+        return bool(self.api_key and self.folder_id)
     
     def process_query(self, user_text: str, history: List[str] = None) -> Dict:
         """Обработка запроса через Алису"""
         self.stats["calls"] += 1
         
         # Проверяем наличие ключей
-        if not self.api_key or not self.folder_id:
+        if not self.is_configured():
             self.stats["errors"] += 1
             return {
                 "status": "error",

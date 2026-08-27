@@ -20,15 +20,10 @@ from telebot import types
 
 import db
 import bot_context
-import navigation
 import document_commands
 import services.user_service as us
 
 from services.extra import (
-    load_ships,
-    add_ship,
-    get_chat_state,
-    set_chat_state,
     detect_ship,
     detect_pump_type,
     detect_equipment_type,
@@ -37,17 +32,50 @@ from services.extra import (
     analyze_query_local,
     generate_work_volume,
     generate_base_work_volume,
-    get_user_role,
-    find_employee_role,
-    can_upload_repair_list,
-    save_repair_items_to_db,
 )
+from services.catalog_service import add_ship, find_employee_role, load_ships
+from services.chat_state_service import get_chat_state, set_chat_state
 from services.document_builder import create_defect_document, create_avr_document
+from services.repair_statement_service import save_repair_items_to_db
+from services.user_service import can_upload_repair_list, get_user_role
 from models import SessionLocal, Ship
 
 from utils import NAVIGATION_BUTTONS
 
 logger = logging.getLogger(__name__)
+
+
+def _is_ai_configured():
+    router = bot_context.alisa_router
+    return bool(
+        router
+        and callable(getattr(router, "is_configured", None))
+        and router.is_configured()
+    )
+
+
+def _build_welcome_text():
+    """Сформировать приветствие по фактически доступным возможностям."""
+    ai_status = (
+        "🧠 YandexGPT подключён для инженерных запросов."
+        if _is_ai_configured()
+        else "🧰 Основные функции работают локально; внешний AI пока не подключён."
+    )
+    return (
+        "👋 Привет! Я — инженерный ассистент ООО «Новое Время».\n\n"
+        "Что доступно:\n"
+        "• ремонтные ведомости по судам;\n"
+        "• создание актов дефектации в утверждённом XLSX-шаблоне;\n"
+        "• загрузка, скачивание и согласование документов;\n"
+        "• акты выполненных работ;\n"
+        "• проверка параметров и поиск по базе ГОСТов.\n\n"
+        "Основные команды:\n"
+        "• /login — вход или регистрация;\n"
+        "• /myid — ваш Telegram ID;\n"
+        "• /gosts — список ГОСТов;\n"
+        "• /search — поиск по ГОСТам.\n\n"
+        f"{ai_status}"
+    )
 
 
 def register_message_handlers(bot: telebot.TeleBot) -> None:
@@ -76,31 +104,17 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
     @bot.message_handler(commands=['start'])
     def send_welcome(message):
         """Приветственное сообщение и кнопки навигации."""
+        bot.reply_to(message, _build_welcome_text())
+        show_navigation_menu(message.chat.id)
+
+    @bot.message_handler(commands=['myid'])
+    def cmd_myid(message):
+        """Показать пользователю его собственный Telegram ID."""
         bot.reply_to(
             message,
-            "👋 Привет! Я — твой инженерный ассистент.\n\n"
-            "📌 Что я умею:\n"
-            "• Создавать Акты дефектации (скажи 'сделай акт')\n"
-            "• Создавать Акты выполненных работ (скажи 'сделай АВР')\n"
-            "• Проверять зазоры по ТУ (скажи 'проверь зазор')\n"
-            "• Проверять параметры по ГОСТам (скажи 'проверь по ГОСТ')\n"
-            "• Показывать частые дефекты (спроси 'какие дефекты')\n"
-            "• Показывать чек-лист деталей (спроси 'чек-лист насоса')\n\n"
-            "📌 Типы оборудования в базе:\n"
-            "• Насосы: центробежные, шестерёнчатые, поршневые\n"
-            "• Двигатели (MAN, Caterpillar и др.)\n\n"
-            "📌 Доступные команды:\n"
-            "• /gosts — список всех ГОСТов\n"
-            "• /search — поиск по ГОСТам\n"
-            "• /stats — статистика AI\n\n"
-            "🧠 Я использую Яндекс.Алису и базу знаний для анализа запросов!\n\n"
-            "📝 Примеры:\n"
-            "• 'Судно Славянская, пожарный насос, повреждена крылатка. Сделай акт'\n"
-            "• 'Судно Аргака, главный двигатель MAN, износ поршневых колец. Сделай акт'\n"
-            "• 'проверь по ГОСТ 520-2011 диаметр=50'\n"
-            "• 'проверь по ГОСТ 3325-85 зазор=0.15'"
+            f"🆔 Ваш Telegram ID: `{message.from_user.id}`",
+            parse_mode="Markdown",
         )
-        show_navigation_menu(message.chat.id)
 
     # ============================================================
     #  АВТОРИЗАЦИЯ И РОЛИ
@@ -110,6 +124,22 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
     def cmd_login(message):
         """Регистрация/вход пользователя."""
         user = us.get_user(message.chat.id)
+        if not user and message.chat.id in bot_context.ADMIN_IDS:
+            first_name = getattr(message.from_user, "first_name", None) or "Администратор"
+            last_name = getattr(message.from_user, "last_name", None)
+            name = " ".join(part for part in (first_name, last_name) if part)
+            user = us.create_user(
+                message.chat.id,
+                name,
+                us.ROLE_ENGINEER,
+                approved=1,
+            )
+            bot.reply_to(
+                message,
+                f"✅ Владелец зарегистрирован как инженер-технолог, {user.name}.",
+            )
+            show_navigation_menu(message.chat.id)
+            return
         if user and user.approved:
             bot.reply_to(
                 message,
@@ -120,6 +150,9 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
             return
         if user and not user.approved:
             bot.reply_to(message, "⏳ Ваша заявка ещё на рассмотрении. Ожидайте одобрения.")
+            return
+        if us.get_pending_user(message.chat.id):
+            bot.reply_to(message, "⏳ Ваша заявка уже отправлена и ожидает одобрения.")
             return
         set_chat_state(message.chat.id, "reg_step", "name")
         bot.reply_to(message, "📝 Регистрация. Введите ваше ФИО:")
@@ -475,13 +508,13 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
         # ВАЖНО: telebot выполняет только первый совпавший message_handler из
         # общего списка (см. TeleBot._run_middlewares_and_handler -> break).
         # handle_message регистрируется раньше специфичных хендлеров кнопок
-        # (bot_handlers_new.register_navigation_handlers), поэтому те хендлеры
+        # (repair_handlers.register_navigation_handlers), поэтому те хендлеры
         # для кнопок никогда не вызываются сами — их нужно вызвать явно здесь.
         if user_text in NAVIGATION_BUTTONS:
             if bot_context.DOCUMENT_MANAGER_AVAILABLE:
-                import bot_handlers_new
+                from handlers import repair_handlers
                 if user_text in ("📋 Ремонтная ведомость", "🚢 Суда"):
-                    bot_handlers_new._show_ships_menu(bot, message.chat.id)
+                    repair_handlers._show_ships_menu(bot, message.chat.id)
                 elif user_text == "📄 Документы":
                     bot.send_message(
                         message.chat.id,
@@ -548,7 +581,7 @@ def register_message_handlers(bot: telebot.TeleBot) -> None:
                 )
                 approvers = [
                     u.telegram_id for u in us.get_users()
-                    if u.approved and u.role in (us.ROLE_ENGINEER, us.ROLE_DIRECTOR)
+                    if u.approved and (us.is_engineer(u) or us.is_director(u))
                 ]
                 for uid in approvers:
                     try:

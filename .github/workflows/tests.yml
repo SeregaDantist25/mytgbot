@@ -1,0 +1,28 @@
+name: Tests
+
+on:
+  push:
+    branches: [master, dev/mytgbot-v2]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: pytest -q
+        env:
+          DATABASE_URL: sqlite:///data/test_suite.db
+          LOG_FILE: ""
+
+  container:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag mytgbot-ci .

@@ -31,7 +31,7 @@ def require_role(allowed_roles: List[str]):
         @wraps(func)
         def wrapper(message: types.Message, *args, **kwargs):
             try:
-                from services.extra import get_user_role
+                from services.user_service import get_user_role
                 
                 user_id = message.from_user.id
                 user_role = get_user_role(user_id)

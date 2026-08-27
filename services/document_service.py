@@ -177,18 +177,17 @@ def delete_document(document_id: int, user_id: int, admin_ids=None) -> Tuple[boo
         doc = session.query(Document).filter_by(id=document_id).first()
         if not doc:
             return False, "❌ Документ не найден"
-        if doc.status == "approved" and user_id not in admin_ids:
+        is_approved = doc.status == "approved"
+        if is_approved and user_id not in admin_ids:
             return False, "🚫 Только админы могут удалять approved документы"
-        if doc.file_ref:
-            storage.delete_file(doc.file_ref)
-        session.delete(doc)
-        session.commit()
-        return True, "✅ Документ удалён"
-    except Exception as e:
-        session.rollback()
-        return False, f"❌ Ошибка: {str(e)}"
     finally:
         session.close()
+
+    deleted = storage.delete_file(
+        document_id=document_id,
+        allow_approved=is_approved and user_id in admin_ids,
+    )
+    return (True, "✅ Документ удалён") if deleted else (False, "❌ Не удалось удалить документ")
 
 
 def replace_document(
@@ -215,18 +214,13 @@ def replace_document(
             return False, "❌ Документ не найден"
         if doc.status != "draft":
             return False, "❌ Можно заменять только черновики"
-        if doc.file_ref:
-            storage.delete_file(doc.file_ref)
         result = storage.replace_document(
             document_id=document_id,
             new_file_content=file_data,
             new_file_name=None
         )
-        if result['success']:
-            new_ref = doc.file_ref
-        else:
-            return None
-        doc.file_ref = new_ref
+        if not result["success"]:
+            return False, f"❌ {result['message']}"
         doc.file_type = file_type
         session.commit()
         return True, "✅ Документ заменён"

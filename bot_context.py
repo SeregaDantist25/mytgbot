@@ -20,7 +20,7 @@ alisa_router = None
 # Создатель актов через Алису (ai.alisa_act_creator.act_creator) или None.
 alisa_act_creator = None
 
-# База данных насосов (services.extra.PumpDatabase) или None.
+# База данных насосов (services.pump_knowledge_service.PumpDatabase) или None.
 pump_db = None
 
 # Список ID администраторов.

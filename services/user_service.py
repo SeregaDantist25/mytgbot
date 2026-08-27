@@ -128,12 +128,14 @@ def update_user_role(user_id: int, new_role: str) -> bool:
 # ============================================================
 
 ROLE_ENGINEER = "engineer"
+ROLE_ENGINEER_TECHNOLOGIST = "engineer_technologist"
 ROLE_DIRECTOR = "director"
 ROLE_BUILDER = "builder"
 ROLE_CUSTOMER = "customer"
 
 ROLE_LABELS = {
     ROLE_ENGINEER: "Инженер-технолог",
+    ROLE_ENGINEER_TECHNOLOGIST: "Инженер-технолог",
     ROLE_DIRECTOR: "Директор",
     ROLE_BUILDER: "Строитель",
     ROLE_CUSTOMER: "Заказчик",
@@ -141,7 +143,7 @@ ROLE_LABELS = {
 
 
 def is_engineer(user) -> bool:
-    return bool(user) and user.role == ROLE_ENGINEER
+    return bool(user) and user.role in (ROLE_ENGINEER, ROLE_ENGINEER_TECHNOLOGIST)
 
 
 def is_director(user) -> bool:
@@ -165,6 +167,16 @@ def get_user_role(telegram_id: int) -> str:
     """Возвращает роль пользователя (или customer, если не найден)."""
     user = get_user(telegram_id)
     return user.role if user else ROLE_CUSTOMER
+
+
+def can_upload_repair_list(telegram_id: int) -> bool:
+    """Ремонтные ведомости могут загружать все производственные роли."""
+    return get_user_role(telegram_id) in {
+        ROLE_ENGINEER,
+        ROLE_ENGINEER_TECHNOLOGIST,
+        ROLE_DIRECTOR,
+        ROLE_BUILDER,
+    }
 
 
 # ============================================================
@@ -199,6 +211,23 @@ def get_pending_users() -> list:
             }
             for p in rows
         ]
+    finally:
+        session.close()
+
+
+def get_pending_user(user_id: int) -> Optional[dict]:
+    """Вернуть одну ожидающую заявку по Telegram ID."""
+    session = SessionLocal()
+    try:
+        pending = session.query(PendingUser).filter_by(user_id=user_id).first()
+        if not pending:
+            return None
+        return {
+            "user_id": pending.user_id,
+            "name": pending.name,
+            "role_requested": pending.role_requested,
+            "phone": pending.phone,
+        }
     finally:
         session.close()
 
